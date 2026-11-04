@@ -1,0 +1,47 @@
+<script setup>
+import { MailCheck } from 'lucide-vue-next'
+import { ref } from 'vue'
+import { api } from '../api'
+import AuthLayout, { button, input } from '../components/AuthLayout.vue'
+
+const email = ref('')
+const password = ref('')
+const sent = ref(false)
+const error = ref('')
+const busy = ref(false)
+
+async function submit() {
+  error.value = ''
+  busy.value = true
+  try {
+    await api('/auth/register', { method: 'POST', body: { email: email.value, password: password.value } })
+    sent.value = true
+  } catch (e) {
+    error.value = e.message
+  } finally {
+    busy.value = false
+  }
+}
+</script>
+
+<template>
+  <AuthLayout :title="sent ? 'Check your email' : 'Sign up for Varsis'">
+    <div v-if="sent" class="text-center text-muted">
+      <MailCheck class="mx-auto mb-4 h-12 w-12 text-accent" />
+      We sent a verification link to <span class="font-bold text-white">{{ email }}</span>. Open it to activate your account.
+    </div>
+    <form v-else class="space-y-4" @submit.prevent="submit">
+      <label class="block text-sm font-bold">Email<input v-model="email" type="email" required autocomplete="email" :class="input" class="mt-2 font-normal" /></label>
+      <label class="block text-sm font-bold">
+        Password
+        <input v-model="password" type="password" required minlength="8" autocomplete="new-password" :class="input" class="mt-2 font-normal" />
+        <span class="mt-1 block text-xs font-normal text-muted">At least 8 characters.</span>
+      </label>
+      <p v-if="error" class="rounded-md bg-red-500/15 px-3 py-2 text-sm text-red-300">{{ error }}</p>
+      <button :class="button" :disabled="busy">Sign up</button>
+    </form>
+    <p class="mt-8 border-t border-white/10 pt-6 text-center text-muted">
+      Already have an account? <RouterLink to="/login" class="font-bold text-white underline hover:text-accent">Log in</RouterLink>
+    </p>
+  </AuthLayout>
+</template>

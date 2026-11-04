@@ -1,0 +1,56 @@
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: varsis
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-varsis}
+      POSTGRES_DB: varsis
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U varsis"]
+      interval: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    env_file: .env
+    depends_on:
+      db: { condition: service_healthy }
+    volumes:
+      - music:/music
+      - downloads:/downloads
+      - covers:/covers
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 10s
+
+  frontend:
+    build: ./frontend
+    ports: ["8080:80"]
+    depends_on: [backend]
+
+  mailpit:
+    image: axllent/mailpit
+    ports: ["8025:8025", "1025:1025"]
+
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    environment: { PUID: "1000", PGID: "1000", TZ: "${TZ:-Europe/Ljubljana}" }
+    volumes: [prowlarr-config:/config]
+    ports: ["9696:9696"]
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    environment: { PUID: "1000", PGID: "1000", TZ: "${TZ:-Europe/Ljubljana}", WEBUI_PORT: "8081" }
+    volumes:
+      - qbit-config:/config
+      - downloads:/downloads
+    ports: ["8081:8081", "6881:6881", "6881:6881/udp"]
+
+volumes:
+  pgdata:
+  music:
+  downloads:
+  covers:
+  prowlarr-config:
+  qbit-config:
