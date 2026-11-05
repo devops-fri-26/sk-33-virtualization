@@ -22,7 +22,7 @@ Deferred work, manual setup steps and open questions. Items under "Open question
 - [ ] Set `APP_URL` to the real **https** URL. Verification links and the secure cookie use it, and the prefetch cache only works on https or localhost.
 - [ ] Set a long random `SECRET_KEY` and a strong `POSTGRES_PASSWORD`.
 - [ ] Pin the image versions of `prowlarr`, `qbittorrent` and `mailpit` (currently `latest`).
-- [ ] Prowlarr (9696), qBittorrent (8081) and Mailpit (8025) are published on all network interfaces, so other devices on the network can reach them. Publish them on localhost only, e.g. `"127.0.0.1:9696:9696"` (ask first).
+- [x] Prowlarr (9696), qBittorrent (8081) and Mailpit (8025/1025) are published on localhost only. The app (8080) is still reachable from your network.
 - [ ] Schema changes: `create_all` only creates *new* tables, so changing an existing column needs manual SQL or Alembic.
 
 ## Open questions / not built (ask first)
@@ -32,9 +32,15 @@ Deferred work, manual setup steps and open questions. Items under "Open question
 - [ ] Torrents: after import the torrent is removed from qBittorrent, so it stops seeding. Private trackers may penalise this. The alternative is to copy the files and keep seeding.
 - [ ] Torrents: cancel or remove a download from the UI.
 - [ ] Torrents: CUE + single-FLAC album rips import as one long track.
-- [ ] Torrents: mark or prefer lossless (FLAC) results in the search list.
+- [x] Torrents: search by artist(s) + album/song with a file-type filter; on download, only supported files are downloaded.
+- [ ] Prowlarr's Internet Archive definition is buggy: sort "created" is rejected by archive.org (0 results), and items without a `publicdate` crash a search and pause the indexer. Use sort "downloads" for now; a custom Prowlarr definition (`/config/Definitions/Custom`) sorting by `publicdate` with an optional date would fix both.
+- [ ] archive.org throttles requests from Prowlarr (30-90 s per search vs ~1 s normally). Varsis now waits up to 3 minutes. A faster option would be a native archive.org search in Varsis with its own honest User-Agent (ask first).
+- [ ] Torrents: show Prowlarr indexer errors/backoff in Varsis (now a failing indexer just looks like "No matching torrents").
 - [ ] Torrents: a job stays in "importing" if the backend restarts during an import.
-- [ ] Torrents: qBittorrent exposes the server's IP to peers. Use a VPN container?
+- [x] Torrents: only the best version of each song is downloaded; stalled downloads (no progress for 10 min) import what finished.
+- [ ] Stall detection is in memory: after a backend restart, the 10-minute timer starts again.
+- [x] Torrents: qBittorrent runs behind Proton VPN (gluetun, WireGuard, port forwarding, kill switch).
+- [ ] Prowlarr's searches go to indexer sites from your real IP (only searches, no downloads). It could also be routed through gluetun.
 - [ ] Registration is open to anyone who can reach the site. Make it invite-only or require admin approval?
 - [ ] The library is shared by all users (everyone sees all music). Is that intended?
 - [ ] Delete tracks, or edit title/album, from the UI.

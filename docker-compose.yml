@@ -31,21 +31,48 @@ services:
 
   mailpit:
     image: axllent/mailpit
-    ports: ["8025:8025", "1025:1025"]
+    ports: ["127.0.0.1:8025:8025", "127.0.0.1:1025:1025"]
 
   prowlarr:
     image: lscr.io/linuxserver/prowlarr:latest
     environment: { PUID: "1000", PGID: "1000", TZ: "${TZ:-Europe/Ljubljana}" }
     volumes: [prowlarr-config:/config]
-    ports: ["9696:9696"]
+    ports: ["127.0.0.1:9696:9696"]
+
+  # Proton VPN tunnel for torrent traffic only. qBittorrent shares this container's network,
+  # so it has no internet if the VPN is down (kill switch).
+  gluetun:
+    image: qmcgaw/gluetun:v3
+    restart: unless-stopped
+    cap_add: [NET_ADMIN]
+    devices: [/dev/net/tun:/dev/net/tun]
+    environment:
+      VPN_SERVICE_PROVIDER: protonvpn
+      VPN_TYPE: wireguard
+      WIREGUARD_PRIVATE_KEY: ${WIREGUARD_PRIVATE_KEY:?set WIREGUARD_PRIVATE_KEY in .env}
+      PORT_FORWARD_ONLY: "on" # only P2P servers with port forwarding
+      SERVER_COUNTRIES: ${VPN_COUNTRIES:-Austria,Italy,Hungary,Croatia,Switzerland,Germany} # nearby = faster
+      VPN_PORT_FORWARDING: "on"
+      # Tell qBittorrent which port Proton forwarded (needs localhost auth bypass in qBittorrent)
+      VPN_PORT_FORWARDING_UP_COMMAND: >-
+        /bin/sh -c 'wget -O- --retry-connrefused --post-data "json={\"listen_port\":{{PORTS}}}" http://127.0.0.1:8081/api/v2/app/setPreferences 2>&1'
+      TZ: ${TZ:-Europe/Ljubljana}
+    ports: ["127.0.0.1:8081:8081"] # qBittorrent web UI
+    networks:
+      default:
+        aliases: [qbittorrent] # backend keeps using http://qbittorrent:8081
 
   qbittorrent:
     image: lscr.io/linuxserver/qbittorrent:latest
+    network_mode: service:gluetun
+    # Start with gluetun even while the VPN is still connecting (no internet until it's up = kill switch).
+    depends_on:
+      gluetun: { condition: service_started }
+    restart: unless-stopped
     environment: { PUID: "1000", PGID: "1000", TZ: "${TZ:-Europe/Ljubljana}", WEBUI_PORT: "8081" }
     volumes:
       - qbit-config:/config
       - downloads:/downloads
-    ports: ["8081:8081", "6881:6881", "6881:6881/udp"]
 
 volumes:
   pgdata:
