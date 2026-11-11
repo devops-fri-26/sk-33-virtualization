@@ -2,6 +2,8 @@
 import { LoaderCircle, Magnet, X } from 'lucide-vue-next'
 import { ref } from 'vue'
 import { api, fmtSize } from '../api'
+import { infoRows, openInfo } from '../torrentInfo'
+import InfoButton from './InfoButton.vue'
 
 const props = defineProps({ q: { type: String, required: true } })
 const FORMATS = [
@@ -59,7 +61,7 @@ async function search() {
 async function download(r) {
   error.value = ''
   try {
-    const job = await api('/torrents', { method: 'POST', body: { title: r.title, url: r.url } })
+    const job = await api('/torrents', { method: 'POST', body: { title: r.title, url: r.url, info: r } })
     started.value = new Map(started.value).set(r.url, job.message)
   } catch (e) {
     error.value = `${r.title}: ${e.message}`
@@ -139,6 +141,7 @@ const label = (id) => FORMATS.find((f) => f.id === id)?.label ?? id
             <span v-if="r.magnet_only" title="Magnet links can't be checked before downloading">· magnet, not checked</span>
           </p>
         </div>
+        <InfoButton :title="r.title" :rows="infoRows(r)" @open="openInfo(r)" />
         <RouterLink v-if="started.has(r.url)" to="/torrents" class="shrink-0 text-right text-sm font-bold text-accent hover:underline">
           Downloading →<span v-if="started.get(r.url)" class="block text-xs font-normal text-muted">{{ started.get(r.url) }}</span>
         </RouterLink>

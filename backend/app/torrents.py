@@ -52,6 +52,7 @@ def job_out(j: TorrentJob):
         "progress": j.progress,
         "message": j.message,
         "created_at": j.created_at,
+        "details": j.details,
     }
 
 
@@ -92,6 +93,49 @@ async def _prowlarr(c: httpx.AsyncClient, query: str) -> list[dict]:
     )
     r.raise_for_status()
     return r.json()
+
+
+PRIVATE_FIELDS = {"downloadUrl", "magnetUrl"}  # Prowlarr links carry its API key
+
+
+def _qbit_up() -> bool:
+    try:
+        qbittorrentapi.Client(
+            host=settings.qbit_url,
+            username=settings.qbit_user,
+            password=settings.qbit_pass,
+            REQUESTS_ARGS={"timeout": 3},
+        ).app_version()
+        return True
+    except Exception:
+        return False
+
+
+async def _prowlarr_up() -> bool:
+    if not settings.prowlarr_api_key:
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=3) as c:
+            r = await c.get(f"{settings.prowlarr_url}/api/v1/health", headers={"X-Api-Key": settings.prowlarr_api_key})
+        return r.is_success
+    except httpx.HTTPError:
+        return False
+
+
+_status_cache: tuple[float, dict] | None = None
+STATUS_TTL = 20  # seconds
+
+
+@router.get("/status")
+async def status(_: CurrentUser):
+    """Whether torrent search/download is usable: Prowlarr and qBittorrent both reachable."""
+    global _status_cache
+    if _status_cache and time.monotonic() - _status_cache[0] < STATUS_TTL:
+        return _status_cache[1]
+    prowlarr, qbit = await asyncio.gather(_prowlarr_up(), asyncio.to_thread(_qbit_up))
+    result = {"prowlarr": prowlarr, "qbittorrent": qbit, "available": prowlarr and qbit}
+    _status_cache = (time.monotonic(), result)
+    return result
 
 
 @router.get("/search")
@@ -142,6 +186,8 @@ async def search(
                 "formats": found,  # empty = not stated in the title
                 "magnet_only": url.startswith("magnet:"),
                 "url": url,
+                # Everything else the indexer reported, for the info popup/page (download links left out).
+                "details": {k: v for k, v in x.items() if k not in PRIVATE_FIELDS and v not in (None, "", [], {})},
             }
         )
     return sorted(results, key=lambda x: x["seeders"], reverse=True)
@@ -150,6 +196,7 @@ async def search(
 class AddTorrent(BaseModel):
     title: str
     url: str  # magnet link or a Prowlarr download link from /search
+    info: dict | None = None  # the search result, kept for the job's info page
 
 
 async def _resolve(url: str) -> tuple[str | None, bytes | None]:
@@ -196,6 +243,15 @@ def torrent_files(torrent: bytes) -> list[str]:
         if b"files" not in info:  # single-file torrent
             return [info[b"name"].decode(errors="replace")]
         return ["/".join(part.decode(errors="replace") for part in f[b"path"]) for f in info[b"files"]]
+    except (ValueError, KeyError, IndexError, TypeError):
+        raise HTTPException(502, "Could not read the .torrent file")
+
+
+def torrent_file_sizes(torrent: bytes) -> list[int]:
+    """File sizes inside a .torrent, in the same order as torrent_files()."""
+    try:
+        info = _bdecode(torrent)[0][b"info"]
+        return [f[b"length"] for f in info[b"files"]] if b"files" in info else [info[b"length"]]
     except (ValueError, KeyError, IndexError, TypeError):
         raise HTTPException(502, "Could not read the .torrent file")
 
@@ -271,15 +327,19 @@ def best_versions(paths: list[str]) -> list[int]:
 @router.post("", status_code=201)
 async def add(data: AddTorrent, db: SessionDep, user: CurrentUser):
     magnet, torrent = await _resolve(data.url)
-    skip = []
+    skip, details = [], {k: v for k, v in (data.info or {}).items() if k != "url"}
     if torrent:  # check the contents; download only supported audio files
         files = torrent_files(torrent)
         keep = best_versions(files)
+        details["info_hash"] = info_hash(torrent)
+        details["contents"] = [
+            {"path": p, "size": s, "download": i in keep} for i, (p, s) in enumerate(zip(files, torrent_file_sizes(torrent)))
+        ]
         skip = [i for i in range(len(files)) if i not in keep]
         if not keep:
             exts = sorted({Path(f).suffix.lower() or "(none)" for f in files})[:8]
             raise HTTPException(400, f"No supported audio files in this torrent (contains: {', '.join(exts)})")
-    job = TorrentJob(user_id=user.id, title=data.title)
+    job = TorrentJob(user_id=user.id, title=data.title, details=details or None)
     db.add(job)
     await db.flush()
     try:
@@ -292,12 +352,64 @@ async def add(data: AddTorrent, db: SessionDep, user: CurrentUser):
     return job_out(job)
 
 
+class TorrentUrl(BaseModel):
+    url: str
+
+
+@router.post("/files")
+async def files(data: TorrentUrl, _: CurrentUser):
+    """Files inside a search result's .torrent, and which ones a download would fetch."""
+    magnet, torrent = await _resolve(data.url)
+    if not torrent:
+        return {"magnet": True, "info_hash": None, "files": []}
+    paths, sizes = torrent_files(torrent), torrent_file_sizes(torrent)
+    keep = set(best_versions(paths))
+    return {
+        "magnet": False,
+        "info_hash": info_hash(torrent),
+        "files": [{"path": p, "size": s, "download": i in keep} for i, (p, s) in enumerate(zip(paths, sizes))],
+    }
+
+
 @router.get("")
 async def jobs(db: SessionDep, user: CurrentUser):
     rows = await db.scalars(
         select(TorrentJob).where(TorrentJob.user_id == user.id).order_by(TorrentJob.id.desc()).limit(100)
     )
     return [job_out(j) for j in rows]
+
+
+LIVE_FIELDS = [  # qBittorrent torrent properties shown on a download's info page
+    "state", "dlspeed", "upspeed", "eta", "num_seeds", "num_complete", "num_leechs", "num_incomplete",
+    "size", "downloaded", "uploaded", "ratio", "availability", "added_on", "hash", "tracker",
+]
+
+
+def _live(job_id: int):
+    q = _qbit()
+    t = next(iter(q.torrents_info(tag=_tag(job_id))), None)
+    if t is None:
+        return None
+    files = q.torrents_files(torrent_hash=t.hash)
+    return {
+        **{k: t.get(k) for k in LIVE_FIELDS},
+        "files": [{"path": f.name, "size": f.size, "progress": f.progress, "download": bool(f.priority)} for f in files],
+    }
+
+
+@router.get("/{job_id}")
+async def job_info(job_id: int, db: SessionDep, user: CurrentUser):
+    """One download, plus live qBittorrent stats while it's still in qBittorrent."""
+    job = await db.get(TorrentJob, job_id)
+    if job is None or job.user_id != user.id:
+        raise HTTPException(404, "Download not found")
+    live = None
+    if job.status in ("downloading", "importing"):
+        try:
+            live = await asyncio.to_thread(_live, job_id)
+        except qbittorrentapi.APIError:
+            pass  # show the stored info only
+    return {**job_out(job), "live": live}
 
 
 # ---------- poller ----------

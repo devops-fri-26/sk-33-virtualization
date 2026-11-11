@@ -1,30 +1,34 @@
 <script setup>
 import { Download, House, Library, LogOut, Search, Upload } from 'lucide-vue-next'
-import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import PlayerBar from './components/PlayerBar.vue'
 import QueuePanel from './components/QueuePanel.vue'
 import Sidebar from './components/Sidebar.vue'
 import { useAuth } from './stores/auth'
 import { usePlayer } from './stores/player'
+import { useTorrents } from './stores/torrents'
 import { useUi } from './stores/ui'
 
 const auth = useAuth()
 const player = usePlayer()
+const torrents = useTorrents()
 const ui = useUi()
 const route = useRoute()
 const router = useRouter()
 const main = ref(null)
 const userMenu = ref(false)
-const mobileNav = [
+const mobileNav = computed(() => [
   { to: '/', label: 'Home', icon: House },
   { to: '/search', label: 'Search', icon: Search },
   { to: '/library', label: 'Library', icon: Library },
   { to: '/upload', label: 'Upload', icon: Upload },
-  { to: '/torrents', label: 'Torrents', icon: Download },
-]
+  ...(torrents.available ? [{ to: '/torrents', label: 'Torrents', icon: Download }] : []),
+])
 
 watch(() => route.path, () => main.value?.scrollTo(0, 0))
+// Re-check torrent services on each page change once logged in (the server caches the answer for 20 s).
+watch(() => [route.path, auth.user], () => auth.user && !route.meta.public && torrents.check(), { immediate: true })
 
 async function logout() {
   userMenu.value = false

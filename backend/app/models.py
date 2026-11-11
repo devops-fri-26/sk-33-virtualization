@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, ForeignKey, String, Table, func
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, String, Table, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -84,11 +84,14 @@ class TorrentJob(Base):
     status: Mapped[str] = mapped_column(default="downloading")  # downloading | importing | done | failed
     progress: Mapped[float] = mapped_column(default=0)
     message: Mapped[str | None]  # error or import summary
+    details: Mapped[dict | None] = mapped_column(JSON)  # search result info + the .torrent's file list
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-# Trigram indexes for fuzzy search (run at startup after create_all).
+# Run at startup after create_all: trigram indexes for fuzzy search, and columns added after release
+# (create_all doesn't add columns to existing tables).
 SEARCH_SQL = [
+    "ALTER TABLE torrent_jobs ADD COLUMN IF NOT EXISTS details JSON",
     "CREATE EXTENSION IF NOT EXISTS pg_trgm",
     "CREATE INDEX IF NOT EXISTS tracks_title_trgm ON tracks USING gin (title gin_trgm_ops)",
     "CREATE INDEX IF NOT EXISTS artists_name_trgm ON artists USING gin (name gin_trgm_ops)",

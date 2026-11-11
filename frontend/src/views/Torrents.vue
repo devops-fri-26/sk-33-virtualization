@@ -2,6 +2,8 @@
 import { Check, CircleX, LoaderCircle } from 'lucide-vue-next'
 import { onMounted, onUnmounted, ref } from 'vue'
 import { api } from '../api'
+import InfoButton from '../components/InfoButton.vue'
+import { jobRows } from '../torrentInfo'
 
 const jobs = ref(null)
 const load = async () => (jobs.value = await api('/torrents'))
@@ -38,6 +40,7 @@ onUnmounted(() => clearInterval(timer))
           </div>
           <p v-if="j.message" class="mt-1 text-sm text-muted">{{ j.message }}</p>
         </div>
+        <InfoButton :title="j.title" :rows="jobRows(j)" :href="`/torrents/${j.id}`" />
       </div>
     </div>
   </div>

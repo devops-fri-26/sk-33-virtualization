@@ -1,17 +1,19 @@
 <script setup>
 import { AudioLines, Download, House, Library, Plus, Search, Upload, Volume2 } from 'lucide-vue-next'
-import { onMounted } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePlayer } from '../stores/player'
 import { usePlaylists } from '../stores/playlists'
+import { useTorrents } from '../stores/torrents'
 import Cover from './Cover.vue'
 
-const nav = [
+const torrents = useTorrents()
+const nav = computed(() => [
   { to: '/', label: 'Home', icon: House },
   { to: '/search', label: 'Search', icon: Search },
   { to: '/upload', label: 'Upload', icon: Upload },
-  { to: '/torrents', label: 'Torrents', icon: Download },
-]
+  ...(torrents.available ? [{ to: '/torrents', label: 'Torrents', icon: Download }] : []),
+])
 const route = useRoute()
 const router = useRouter()
 const player = usePlayer()

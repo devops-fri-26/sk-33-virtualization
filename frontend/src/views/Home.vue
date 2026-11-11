@@ -8,7 +8,9 @@ import PlayButton from '../components/PlayButton.vue'
 import TrackList from '../components/TrackList.vue'
 import { usePlayer } from '../stores/player'
 import { usePlaylists } from '../stores/playlists'
+import { useTorrents } from '../stores/torrents'
 
+const torrents = useTorrents()
 const player = usePlayer()
 const playlists = usePlaylists()
 const recent = ref(null)
@@ -83,7 +85,7 @@ onMounted(async () => {
     <div v-else-if="recent" class="mt-20 flex flex-col items-center text-center">
       <Upload class="mb-4 h-14 w-14 text-muted" />
       <h2 class="text-2xl font-bold">Your library is empty</h2>
-      <p class="mt-2 text-muted">Upload your music, or find it with torrent search.</p>
+      <p class="mt-2 text-muted">{{ torrents.available ? 'Upload your music, or find it with torrent search.' : 'Upload your music to get started.' }}</p>
       <div class="mt-6 flex gap-3">
         <RouterLink to="/upload" class="rounded-full bg-white px-6 py-3 font-bold text-black hover:scale-105">Upload music</RouterLink>
         <RouterLink to="/search" class="rounded-full border border-white/30 px-6 py-3 font-bold hover:border-white">Search</RouterLink>

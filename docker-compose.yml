@@ -39,6 +39,13 @@ services:
     volumes: [prowlarr-config:/config]
     ports: ["127.0.0.1:9696:9696"]
 
+  # Solves Cloudflare challenges for Prowlarr indexers (e.g. bt.etree.org).
+  # In Prowlarr: Settings → Indexers → add FlareSolverr proxy at http://flaresolverr:8191, tag it, tag the indexer.
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    restart: unless-stopped
+    environment: { LOG_LEVEL: info, TZ: "${TZ:-Europe/Ljubljana}" }
+
   # Proton VPN tunnel for torrent traffic only. qBittorrent shares this container's network,
   # so it has no internet if the VPN is down (kill switch).
   gluetun:
