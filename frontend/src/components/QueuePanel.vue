@@ -1,7 +1,7 @@
 <script setup>
 import { X } from 'lucide-vue-next'
 import { computed } from 'vue'
-import { coverUrl } from '../api'
+import { trackCoverUrl } from '../api'
 import { usePlayer } from '../stores/player'
 import { useUi } from '../stores/ui'
 import Cover from './Cover.vue'
@@ -31,7 +31,7 @@ const names = (t) => t.artists.map((a) => a.name).join(', ')
       <template v-if="p.current">
         <h3 class="px-2 pb-2 font-bold">Now playing</h3>
         <div class="flex items-center gap-3 rounded-md p-2">
-          <Cover :src="coverUrl(p.current.album)" class="h-12 w-12 shrink-0" />
+          <Cover :src="trackCoverUrl(p.current)" class="h-12 w-12 shrink-0" />
           <div class="min-w-0">
             <div class="truncate text-accent">{{ p.current.title }}</div>
             <div class="truncate text-sm text-muted">{{ names(p.current) }}</div>
@@ -52,7 +52,7 @@ const names = (t) => t.artists.map((a) => a.name).join(', ')
             :title="`Play ${it.track.title}`"
             @click="p.jumpTo(p.pos + 1 + (g ? queued.length : 0) + k)"
           >
-            <Cover :src="coverUrl(it.track.album)" class="h-12 w-12 shrink-0" />
+            <Cover :src="trackCoverUrl(it.track)" class="h-12 w-12 shrink-0" />
             <div class="min-w-0 flex-1">
               <div class="truncate">{{ it.track.title }}</div>
               <div class="truncate text-sm text-muted">{{ names(it.track) }}</div>

@@ -1,16 +1,16 @@
-"""FastAPI entry point: app, lifespan (DB setup, torrent poller) and routers."""
+"""FastAPI entry point: app, lifespan (DB setup, admins, torrent poller) and routers."""
 
 import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
-from sqlalchemy import text
+from sqlalchemy import text, update
 
-from . import auth, library, playlists, torrents
+from . import account, admin, auth, library, playlists, torrents
 from .config import settings
 from .db import Base, engine
-from .models import SEARCH_SQL
+from .models import STARTUP_SQL, User
 
 
 @asynccontextmanager
@@ -19,8 +19,16 @@ async def lifespan(app: FastAPI):
         Path(d).mkdir(parents=True, exist_ok=True)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        for sql in SEARCH_SQL:
+        for sql in STARTUP_SQL:
             await conn.execute(text(sql))
+        # A restart in the middle of an import left these behind; the poller finishes them (see _import_job).
+        await conn.execute(text("UPDATE torrent_jobs SET status = 'downloading' WHERE status = 'importing'"))
+        if settings.admins:  # they still need a verified email to log in
+            await conn.execute(
+                update(User)
+                .where(User.email.in_(settings.admins))
+                .values(is_admin=True, is_approved=True, is_disabled=False)
+            )
     poller = asyncio.create_task(torrents.poll_forever())
     yield
     poller.cancel()
@@ -29,6 +37,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Varsis", lifespan=lifespan)
 app.include_router(auth.router)
+app.include_router(account.router)
+app.include_router(admin.router)
 app.include_router(library.router)
 app.include_router(playlists.router)
 app.include_router(torrents.router)

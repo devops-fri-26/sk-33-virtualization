@@ -1,7 +1,7 @@
 <script setup>
 import { ListMusic, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward, Volume1, Volume2, VolumeX } from 'lucide-vue-next'
 import { computed, ref } from 'vue'
-import { coverUrl, fmtTime } from '../api'
+import { fmtTime, trackCoverUrl } from '../api'
 import { useCoverColor } from '../composables/coverColor'
 import { usePlayer } from '../stores/player'
 import { useUi } from '../stores/ui'
@@ -12,7 +12,7 @@ const p = usePlayer()
 const ui = useUi()
 const scrub = ref(null) // seek position while dragging the progress bar
 const shown = computed(() => scrub.value ?? p.time)
-const cover = computed(() => coverUrl(p.current?.album))
+const cover = computed(() => trackCoverUrl(p.current))
 const artists = computed(() => p.current?.artists ?? [])
 const color = useCoverColor(() => cover.value, () => p.current?.title ?? '')
 const VolumeIcon = computed(() => (p.muted || p.volume === 0 ? VolumeX : p.volume < 0.5 ? Volume1 : Volume2))

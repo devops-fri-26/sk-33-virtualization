@@ -40,7 +40,8 @@ export function infoRows(r) {
     { label: 'Info hash', value: d.infoHash },
     { label: 'Link type', value: r.magnet_only ? 'Magnet (contents can’t be checked before downloading)' : '.torrent file' },
     { label: 'GUID', value: d.guid, href: isUrl(d.guid) ? d.guid : undefined },
-    ...Object.entries(LINK_FIELDS).map(([k, label]) => ({ label, value: d[k], href: d[k] })),
+    // Only http(s) links become clickable: an indexer could send "javascript:…" here.
+    ...Object.entries(LINK_FIELDS).map(([k, label]) => ({ label, value: d[k], href: isUrl(d[k]) ? d[k] : undefined })),
     // Anything else the indexer sent that we don't know by name.
     ...Object.entries(d)
       .filter(([k]) => !SKIP.has(k))

@@ -13,7 +13,7 @@ router = APIRouter(prefix="/api/playlists", tags=["playlists"])
 
 
 class Name(BaseModel):
-    name: str = Field(min_length=1, max_length=200)
+    name: str = Field(min_length=1, max_length=200, pattern=r"\S")  # not only spaces
 
 
 class TrackRef(BaseModel):

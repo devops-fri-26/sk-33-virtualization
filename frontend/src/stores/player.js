@@ -2,7 +2,8 @@
 // and a prefetch cache that downloads the next tracks to the device so they start without lag.
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { api, coverUrl, streamUrl } from '../api'
+import { api, streamUrl, trackCoverUrl } from '../api'
+import { useUi } from './ui'
 
 const PREFETCH_AHEAD = 2
 const CACHE_NAME = 'tracks'
@@ -251,17 +252,25 @@ export const usePlayer = defineStore('player', () => {
 
   // Stop and forget everything (used on logout).
   function reset() {
+    loadSeq++ // a track that is still being loaded must not start playing
     audio.pause()
     audio.removeAttribute('src')
+    audio.load()
+    if (blobUrl) URL.revokeObjectURL(blobUrl)
+    blobUrl = null
     base.value = []
     queue.value = []
     pos.value = -1
     source.value = null
+    time.value = duration.value = 0
+    // The next person at this browser shouldn't find this account's music saved on it.
+    if (hasCache) caches.delete(CACHE_NAME).catch(() => {})
+    try { localStorage.removeItem(META_KEY) } catch { /* storage unavailable */ }
   }
 
   function setMediaSession(track) {
     if (!('mediaSession' in navigator)) return
-    const cover = coverUrl(track.album)
+    const cover = trackCoverUrl(track)
     navigator.mediaSession.metadata = new MediaMetadata({
       title: track.title,
       artist: track.artists.map((a) => a.name).join(', '),
@@ -283,6 +292,19 @@ export const usePlayer = defineStore('player', () => {
   audio.addEventListener('pause', () => (playing.value = false))
   audio.addEventListener('timeupdate', () => (time.value = audio.currentTime))
   audio.addEventListener('loadedmetadata', () => (duration.value = audio.duration))
+  // A track that can't be played (deleted from the library meanwhile, server unreachable): say so and move on,
+  // instead of looking like it plays. After 3 in a row, stop.
+  let failures = 0
+  audio.addEventListener('playing', () => (failures = 0))
+  audio.addEventListener('error', () => {
+    const track = current.value
+    if (!track || !audio.getAttribute('src')) return
+    useUi().notify(`Can't play “${track.title}”`)
+    if (++failures <= 3 && pos.value + 1 < queue.value.length) return next()
+    failures = 0
+    audio.pause()
+    playing.value = false
+  })
   audio.addEventListener('ended', () => {
     if (repeat.value === 'one') {
       audio.currentTime = 0

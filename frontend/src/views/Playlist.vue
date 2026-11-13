@@ -2,7 +2,7 @@
 import { Shuffle, Trash2 } from 'lucide-vue-next'
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { api, coverUrl, fmtTotal } from '../api'
+import { api, fmtTotal, trackCoverUrl } from '../api'
 import MediaHeader from '../components/MediaHeader.vue'
 import PlayButton from '../components/PlayButton.vue'
 import TrackList from '../components/TrackList.vue'
@@ -20,7 +20,7 @@ const name = ref('')
 const error = ref('')
 
 const source = computed(() => ({ label: pl.value?.name, to: `/playlist/${id}` }))
-const cover = computed(() => coverUrl(pl.value?.tracks.find((t) => t.album?.cover)?.album))
+const cover = computed(() => trackCoverUrl(pl.value?.tracks.find((t) => t.cover || t.album?.cover)))
 const total = computed(() => pl.value.tracks.reduce((s, t) => s + t.duration, 0))
 
 async function run(fn) {

@@ -1,15 +1,18 @@
 # Varsis without torrents: no Prowlarr, FlareSolverr, VPN or qBittorrent.
 # The app hides torrent search/downloads when they're unreachable; uploads still work.
 #   docker compose -f docker-compose.no-torrents.yml up --build
-# Shares the database/music/covers volumes with the full docker-compose.yml.
+# Uses the same data folders as the full docker-compose.yml: DATA_DIR (default /varsis) /postgres, /music, /covers.
 services:
   db:
     image: postgres:17
+    restart: unless-stopped
     environment:
       POSTGRES_USER: varsis
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-varsis}
+      # Only used when the database volume is first created. To change it later, also run
+      # ALTER USER varsis PASSWORD '...' in the database.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: varsis
-    volumes: [pgdata:/var/lib/postgresql/data]
+    volumes: ["${DATA_DIR:-/varsis}/postgres:/var/lib/postgresql/data"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U varsis"]
       interval: 5s
@@ -17,28 +20,27 @@ services:
 
   backend:
     build: ./backend
+    restart: unless-stopped
     env_file: .env
     environment:
+      DATABASE_URL: postgresql+asyncpg://varsis:${POSTGRES_PASSWORD}@db:5432/varsis
       PROWLARR_API_KEY: "" # torrent search off, even if .env has a key
     depends_on:
       db: { condition: service_healthy }
     volumes:
-      - music:/music
-      - covers:/covers
+      - ${DATA_DIR:-/varsis}/music:/music
+      - ${DATA_DIR:-/varsis}/covers:/covers
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
       interval: 10s
 
   frontend:
     build: ./frontend
+    restart: unless-stopped
     ports: ["8080:80"]
     depends_on: [backend]
 
   mailpit:
-    image: axllent/mailpit
+    image: axllent/mailpit:v1.33.0
+    restart: unless-stopped
     ports: ["127.0.0.1:8025:8025", "127.0.0.1:1025:1025"]
-
-volumes:
-  pgdata:
-  music:
-  covers:

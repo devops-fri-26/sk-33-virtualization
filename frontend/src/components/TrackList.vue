@@ -1,9 +1,10 @@
 <script setup>
 import {
-  ArrowDown, ArrowUp, CirclePlus, Clock3, Download, Ellipsis, ListMusic, ListPlus, Pause, Pencil, Play, Trash2, TriangleAlert,
+  ArrowDown, ArrowUp, CirclePlus, Clock3, Download, Ellipsis, ListMusic, ListPlus, ListX, Pause, Pencil, Play, Trash2, TriangleAlert,
 } from 'lucide-vue-next'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { coverUrl, fmtTime } from '../api'
+import { api, fmtTime, trackCoverUrl } from '../api'
+import { useAuth } from '../stores/auth'
 import { usePlayer } from '../stores/player'
 import { usePlaylists } from '../stores/playlists'
 import { useUi } from '../stores/ui'
@@ -22,6 +23,7 @@ const props = defineProps({
   header: { type: Boolean, default: true },
 })
 const emit = defineEmits(['move', 'remove'])
+const auth = useAuth()
 const player = usePlayer()
 const playlists = usePlaylists()
 const ui = useUi()
@@ -75,9 +77,26 @@ function removeTrack() {
   closeMenu()
 }
 async function addTo(pl) {
-  await playlists.addTrack(pl.id, menu.value.track.id)
-  ui.notify(`Added to ${pl.name}`)
+  try {
+    await playlists.addTrack(pl.id, menu.value.track.id)
+    ui.notify(`Added to ${pl.name}`)
+  } catch (e) {
+    ui.notify(e.message) // e.g. the track or the playlist was deleted meanwhile
+  }
   closeMenu()
+}
+async function deleteTrack() {
+  const track = menu.value.track
+  closeMenu()
+  if (!confirm(`Delete "${track.title}" from the library? The file is deleted for everyone and removed from all playlists.`)) return
+  try {
+    await api(`/tracks/${track.id}`, { method: 'DELETE' })
+  } catch (e) {
+    return ui.notify(e.message)
+  }
+  for (let i = props.tracks.length - 1; i >= 0; i--) if (props.tracks[i].id === track.id) props.tracks.splice(i, 1)
+  ui.notify('Deleted from the library')
+  auth.refresh().catch(() => {}) // storage used
 }
 function saved(updated) {
   props.tracks.filter((t) => t.id === updated.id).forEach((t) => Object.assign(t, updated, { entry_id: t.entry_id }))
@@ -116,7 +135,7 @@ function saved(updated) {
 
       <!-- title + artists -->
       <div class="flex min-w-0 items-center gap-3" @click="isTouch() && play(i)">
-        <Cover v-if="!album" :src="coverUrl(t.album)" class="h-10 w-10 shrink-0" />
+        <Cover v-if="!album" :src="trackCoverUrl(t)" class="h-10 w-10 shrink-0" />
         <div class="min-w-0">
           <div class="truncate text-base" :class="isCurrent(t) ? 'text-accent' : 'text-white'">{{ t.title }}</div>
           <div class="flex items-center gap-1 truncate text-muted">
@@ -125,9 +144,12 @@ function saved(updated) {
               <RouterLink :to="`/artist/${a.id}`" class="hover:text-white hover:underline" @click.stop>{{ a.name }}</RouterLink>
               <span v-if="j < t.artists.length - 1" class="-ml-1">,</span>
             </template>
-            <button v-if="t.needs_artists" class="flex items-center gap-1 text-amber-400 hover:underline" @click.stop="editing = t">
-              <TriangleAlert class="h-3.5 w-3.5" /> Add artists
-            </button>
+            <template v-if="t.needs_artists">
+              <button v-if="auth.canEdit(t)" class="flex items-center gap-1 text-amber-400 hover:underline" @click.stop="editing = t">
+                <TriangleAlert class="h-3.5 w-3.5" /> Add artists
+              </button>
+              <span v-else>Unknown artist</span>
+            </template>
           </div>
         </div>
       </div>
@@ -169,7 +191,7 @@ function saved(updated) {
             <ListPlus class="h-4 w-4" /> Add to queue
           </button>
           <button :class="item" @click="menu.pick = true"><CirclePlus class="h-4 w-4" /> Add to playlist</button>
-          <button :class="item" @click="editTrack"><Pencil class="h-4 w-4" /> Edit artists</button>
+          <button v-if="auth.canEdit(menu.track)" :class="item" @click="editTrack"><Pencil class="h-4 w-4" /> Edit artists</button>
           <a :class="item" :href="`/api/tracks/${menu.track.id}/download`" @click="closeMenu"><Download class="h-4 w-4" /> Download</a>
           <template v-if="playlist">
             <div class="my-1 border-t border-white/10" />
@@ -179,7 +201,11 @@ function saved(updated) {
             <button :class="item" :disabled="menu.index === tracks.length - 1" @click="moveTrack(1)">
               <ArrowDown class="h-4 w-4" /> Move down
             </button>
-            <button :class="item" @click="removeTrack"><Trash2 class="h-4 w-4" /> Remove from this playlist</button>
+            <button :class="item" @click="removeTrack"><ListX class="h-4 w-4" /> Remove from this playlist</button>
+          </template>
+          <template v-if="auth.canEdit(menu.track)">
+            <div class="my-1 border-t border-white/10" />
+            <button :class="item" class="text-red-300" @click="deleteTrack"><Trash2 class="h-4 w-4" /> Delete from library</button>
           </template>
         </template>
       </div>

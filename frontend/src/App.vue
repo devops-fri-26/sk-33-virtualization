@@ -1,5 +1,5 @@
 <script setup>
-import { Download, House, Library, LogOut, Search, Upload } from 'lucide-vue-next'
+import { Download, House, Library, LogOut, Search, Settings, Shield, Upload } from 'lucide-vue-next'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import PlayerBar from './components/PlayerBar.vue'
@@ -29,6 +29,11 @@ const mobileNav = computed(() => [
 watch(() => route.path, () => main.value?.scrollTo(0, 0))
 // Re-check torrent services on each page change once logged in (the server caches the answer for 20 s).
 watch(() => [route.path, auth.user], () => auth.user && !route.meta.public && torrents.check(), { immediate: true })
+
+function toggleUserMenu() {
+  userMenu.value = !userMenu.value
+  if (userMenu.value) auth.refresh().catch(() => {}) // fresh admin badge
+}
 
 async function logout() {
   userMenu.value = false
@@ -71,11 +76,23 @@ onUnmounted(() => {
         <div v-if="userMenu" class="fixed inset-0 z-20" @click="userMenu = false" />
         <div class="sticky top-0 z-30 flex h-0 justify-end">
           <div class="relative m-3 h-fit">
-            <button class="flex h-9 w-9 items-center justify-center rounded-full bg-black/60 p-1 transition hover:scale-105" :title="auth.user?.email" @click="userMenu = !userMenu">
-              <span class="flex h-full w-full items-center justify-center rounded-full bg-accent text-sm font-bold text-black uppercase">{{ auth.user?.email?.[0] }}</span>
+            <button class="relative flex h-9 w-9 items-center justify-center rounded-full bg-black/60 p-1 transition hover:scale-105" :title="auth.user?.email" @click="toggleUserMenu">
+              <span class="flex h-full w-full items-center justify-center rounded-full bg-accent text-sm font-bold text-black uppercase">{{ (auth.user?.name || auth.user?.email)?.[0] }}</span>
+              <span v-if="auth.user?.admin_alerts" class="absolute -top-0.5 -right-0.5 h-3 w-3 rounded-full bg-red-500 ring-2 ring-black" />
             </button>
             <div v-if="userMenu" class="absolute right-0 mt-2 w-60 rounded-md bg-highlight p-1 text-sm shadow-2xl shadow-black/60">
-              <p class="truncate px-3 py-2 text-muted">{{ auth.user?.email }}</p>
+              <div class="px-3 py-2">
+                <p v-if="auth.user?.name" class="truncate font-bold">{{ auth.user.name }}</p>
+                <p class="truncate text-muted">{{ auth.user?.email }}</p>
+              </div>
+              <RouterLink to="/settings" class="flex w-full items-center gap-3 rounded-sm px-3 py-2.5 hover:bg-white/10" @click="userMenu = false">
+                <Settings class="h-4 w-4" /> Settings
+              </RouterLink>
+              <RouterLink v-if="auth.user?.is_admin" to="/admin" class="flex w-full items-center gap-3 rounded-sm px-3 py-2.5 hover:bg-white/10" @click="userMenu = false">
+                <Shield class="h-4 w-4" /> Admin
+                <span v-if="auth.user.admin_alerts" class="ml-auto rounded-full bg-red-500 px-1.5 text-xs leading-5 font-bold">{{ auth.user.admin_alerts }}</span>
+              </RouterLink>
+              <div class="my-1 border-t border-white/10" />
               <button class="flex w-full items-center gap-3 rounded-sm px-3 py-2.5 hover:bg-white/10" @click="logout"><LogOut class="h-4 w-4" /> Log out</button>
             </div>
           </div>
