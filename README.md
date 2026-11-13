@@ -14,6 +14,12 @@ docker compose up --build
 | Prowlarr | http://localhost:9696 |
 | qBittorrent | http://localhost:8081 |
 
+### Without torrents
+```bash
+docker compose -f docker-compose.no-torrents.yml up --build
+```
+Runs only the app, database and Mailpit. You don't need a VPN key, Prowlarr or qBittorrent. Torrent search is hidden in the UI, and uploads still work.
+
 ### One-time setup
 1. **qBittorrent**: the temporary admin password is printed in `docker compose logs qbittorrent`. Log in, set a password under Options → Web UI, and put it in `.env` as `QBIT_PASS`.
 2. **Prowlarr**: open the UI, add indexers (Indexers → Add), copy the API key from Settings → General into `.env` as `PROWLARR_API_KEY`.
