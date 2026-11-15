@@ -46,6 +46,7 @@ search_limit = Limiter(30, 10 * 60)  # torrent searches per user
 
 
 def _qbit() -> qbittorrentapi.Client:
+    """Make a client for the configured qBittorrent. Its calls block, so they are run in a thread."""
     return qbittorrentapi.Client(
         host=settings.qbit_url,
         username=settings.qbit_user,
@@ -55,10 +56,12 @@ def _qbit() -> qbittorrentapi.Client:
 
 
 def _tag(job_id: int) -> str:
+    """Name the qBittorrent tag that marks a torrent as belonging to a job."""
     return f"varsis-{job_id}"
 
 
 def job_out(j: TorrentJob):
+    """Describe a download job the way the frontend gets it."""
     return {
         "id": j.id,
         "title": j.title,
@@ -87,7 +90,16 @@ MP3_CATEGORY = 3010
 
 
 def detect_formats(title: str, categories: list[int]) -> tuple[list[str], bool]:
-    """Supported formats named in a release title (or its category), and whether it names unsupported ones."""
+    """Guess the audio formats of a release from its title (or its category).
+
+    Args:
+        title: The release title, e.g. "Artist - Album (2020) [FLAC]".
+        categories: The ids of the indexer categories the release is in.
+
+    Returns:
+        The supported formats the title names, as file extensions (empty when it names none), and whether it
+        names a format Varsis can't play.
+    """
     t = title.lower()
     found = [fmt for fmt, pattern in FORMAT_PATTERNS.items() if re.search(pattern, t)]
     if not found and MP3_CATEGORY in categories:
@@ -96,10 +108,24 @@ def detect_formats(title: str, categories: list[int]) -> tuple[list[str], bool]:
 
 
 def _norm(text: str) -> str:
+    """Reduce text to lower-case letters and digits with single spaces between, for comparing names."""
     return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
 
 
 async def _prowlarr(c: httpx.AsyncClient, query: str) -> list[dict]:
+    """Run one audio search on Prowlarr, which asks every indexer it knows.
+
+    Args:
+        c: The HTTP client to use.
+        query: The search text.
+
+    Returns:
+        The results as Prowlarr reports them, at most 100.
+
+    Raises:
+        httpx.HTTPError: If Prowlarr can't be reached or answers with an error.
+        ValueError: If its answer isn't JSON.
+    """
     r = await c.get(
         f"{settings.prowlarr_url}/api/v1/search",
         params={"query": query, "categories": AUDIO_CATEGORY, "type": "search", "limit": 100},
@@ -113,7 +139,14 @@ PRIVATE_FIELDS = {"downloadUrl", "magnetUrl"}  # Prowlarr links carry its API ke
 
 
 def _without_key(url: str) -> str:
-    """Drop the `apikey` parameter from a Prowlarr download link before it goes to the browser."""
+    """Drop the `apikey` parameter from a Prowlarr download link before it goes to the browser.
+
+    Args:
+        url: A download link or a magnet link.
+
+    Returns:
+        The link without the key. Magnet links have none and come back unchanged.
+    """
     p = urlparse(url)
     if p.scheme == "magnet":
         return url
@@ -122,12 +155,14 @@ def _without_key(url: str) -> str:
 
 
 def _with_key(url: str) -> str:
+    """Put the server's Prowlarr API key into a download link, replacing any key the link came with."""
     p = urlparse(_without_key(url))
     query = [*parse_qsl(p.query, keep_blank_values=True), ("apikey", settings.prowlarr_api_key)]
     return urlunparse(p._replace(query=urlencode(query)))
 
 
 def _qbit_up() -> bool:
+    """Whether qBittorrent answers and accepts the login, within 3 seconds. Blocks, so run it in a thread."""
     try:
         qbittorrentapi.Client(
             host=settings.qbit_url,
@@ -141,6 +176,7 @@ def _qbit_up() -> bool:
 
 
 async def _prowlarr_up() -> bool:
+    """Whether Prowlarr is configured and answers its health check, within 3 seconds."""
     if not settings.prowlarr_api_key:
         return False
     try:
@@ -157,7 +193,13 @@ STATUS_TTL = 20  # seconds
 
 @router.get("/status")
 async def status(_: CurrentUser):
-    """Whether torrent search/download is usable: Prowlarr and qBittorrent both reachable."""
+    """Whether torrent search/download is usable: Prowlarr and qBittorrent both reachable.
+
+    The answer is remembered for STATUS_TTL seconds, so repeated calls don't each wait on both services.
+
+    Returns:
+        `prowlarr` and `qbittorrent`, whether each one is reachable, and `available`, whether both are.
+    """
     global _status_cache
     if _status_cache and time.monotonic() - _status_cache[0] < STATUS_TTL:
         return _status_cache[1]
@@ -174,8 +216,25 @@ async def search(
     artists: Annotated[list[str], Query()] = [],  # noqa: B006 (FastAPI copies defaults)
     formats: Annotated[list[str], Query()] = [],  # noqa: B006
 ):
-    """Search Prowlarr. With artists: one search per artist, keeping releases that name one of them.
-    With formats: drop releases whose title names only other formats (unknown format is kept)."""
+    """Search the torrent indexers through Prowlarr.
+
+    Args:
+        user: The logged-in user, whose searches are rate limited.
+        q: A title to look for.
+        artists: Artist names. Each one is searched on its own (together with `q`), and only releases whose title
+            names one of them are kept.
+        formats: File extensions the user wants, e.g. "flac". Releases whose title names only other formats are
+            dropped; ones that name no format are kept.
+
+    Returns:
+        The releases with the most seeders first. Each has its title, size, seeders, leechers, indexer, the
+        formats its title names, `magnet_only` (its contents can't be checked before downloading), `url` (the
+        link to pass to add(), without Prowlarr's key) and `details`, everything else the indexer reported.
+
+    Raises:
+        HTTPException: 503 when Prowlarr isn't configured. 422 when neither a title nor an artist was given, or
+            more than MAX_ARTISTS artists. 429 after too many searches. 502 when Prowlarr fails.
+    """
     if not settings.prowlarr_api_key:
         raise HTTPException(503, "Prowlarr is not configured (PROWLARR_API_KEY)")
     artists = [a.strip() for a in artists if a.strip()]
@@ -206,9 +265,9 @@ async def search(
         if artists and not any(_norm(a) in _norm(title) for a in artists):
             continue
         found, unsupported = detect_formats(title, [cat.get("id") for cat in x.get("categories") or []])
-        if wanted and found and not wanted & set(found):
+        if wanted and found and not wanted & set(found):  # names formats, but none of the wanted ones
             continue
-        if unsupported and not found:
+        if unsupported and not found:  # names only formats Varsis can't play
             continue
         results.append(
             {
@@ -234,12 +293,16 @@ async def search(
 
 
 class AddTorrent(BaseModel):
+    """A search result to download."""
+
     title: str = Field(min_length=1, max_length=500)
     url: str = Field(max_length=10_000)  # magnet link or a Prowlarr download link from /search
     info: dict | None = None  # the search result, kept for the job's info page
 
 
 class TorrentUrl(BaseModel):
+    """The link of a search result."""
+
     url: str = Field(max_length=10_000)
 
 
@@ -247,7 +310,18 @@ DOWNLOAD_PATH = re.compile(r"/\d+/download/?$")  # Prowlarr's link for one searc
 
 
 async def _resolve(url: str) -> tuple[str | None, bytes | None]:
-    """Turn a search result URL into (magnet, None) or (None, .torrent bytes)."""
+    """Turn a search result's link into something qBittorrent can take.
+
+    Args:
+        url: A magnet link, or a download link of this server's Prowlarr (without the API key).
+
+    Returns:
+        Either (the magnet link, None) or (None, the content of the .torrent file).
+
+    Raises:
+        HTTPException: 400 when the link is neither of the two. 502 when the .torrent can't be fetched or is
+            bigger than MAX_TORRENT.
+    """
     if url.startswith("magnet:"):
         return url, None
     # Only follow download links of our Prowlarr, so users can't make the server fetch arbitrary URLs
@@ -286,20 +360,35 @@ BAD_TORRENT = (ValueError, KeyError, IndexError, TypeError, AttributeError, Recu
 
 
 def _bdecode(data: bytes, i: int = 0, depth: int = 0):
-    """Minimal bencode decoder (enough to read a .torrent's file list). Returns (value, next index)."""
+    """Decode one bencoded value. A minimal decoder: enough to read a .torrent's file list.
+
+    Bencode is the format of .torrent files. It has integers, byte strings, lists and dicts.
+
+    Args:
+        data: The bencoded bytes.
+        i: The index the value starts at.
+        depth: How deeply nested this value is. The caller leaves it at 0.
+
+    Returns:
+        The value (an int, bytes, a list or a dict with bytes keys) and the index right after it.
+
+    Raises:
+        ValueError: If the data is nested more than 100 levels deep or isn't valid bencode. Broken data can also
+            raise the other errors in BAD_TORRENT.
+    """
     if depth > 100:
         raise ValueError("nested too deeply")
     c = data[i : i + 1]
-    if c == b"i":
+    if c == b"i":  # integer: i<digits>e
         end = data.index(b"e", i)
         return int(data[i + 1 : end]), end + 1
-    if c in (b"l", b"d"):
+    if c in (b"l", b"d"):  # list: l<values>e, dict: d<key><value>…e
         items, i = [], i + 1
         while data[i : i + 1] != b"e":
             value, i = _bdecode(data, i, depth + 1)
             items.append(value)
         return (dict(zip(items[::2], items[1::2])) if c == b"d" else items), i + 1
-    colon = data.index(b":", i)
+    colon = data.index(b":", i)  # byte string: <length>:<bytes>
     n = int(data[i:colon])
     # A negative length would move the position backwards: an endless loop that eats all memory.
     if n < 0 or colon + 1 + n > len(data):
@@ -308,7 +397,17 @@ def _bdecode(data: bytes, i: int = 0, depth: int = 0):
 
 
 def torrent_files(torrent: bytes) -> list[str]:
-    """File paths inside a .torrent, in qBittorrent's file order."""
+    """List the file paths inside a .torrent, in qBittorrent's file order.
+
+    Args:
+        torrent: The content of the .torrent file.
+
+    Returns:
+        One path per file, with "/" between folders. A single-file torrent gives just its name.
+
+    Raises:
+        HTTPException: 502 when the .torrent can't be read.
+    """
     try:
         info = _bdecode(torrent)[0][b"info"]
         if b"files" not in info:  # single-file torrent
@@ -319,7 +418,17 @@ def torrent_files(torrent: bytes) -> list[str]:
 
 
 def torrent_file_sizes(torrent: bytes) -> list[int]:
-    """File sizes inside a .torrent, in the same order as torrent_files()."""
+    """List the file sizes inside a .torrent, in the same order as torrent_files().
+
+    Args:
+        torrent: The content of the .torrent file.
+
+    Returns:
+        One size in bytes per file.
+
+    Raises:
+        HTTPException: 502 when the .torrent can't be read or a size isn't a whole number from 0 up.
+    """
     try:
         info = _bdecode(torrent)[0][b"info"]
         sizes = [f[b"length"] for f in info[b"files"]] if b"files" in info else [info[b"length"]]
@@ -331,9 +440,21 @@ def torrent_file_sizes(torrent: bytes) -> list[int]:
 
 
 def info_hash(torrent: bytes) -> str:
-    """qBittorrent's id for a .torrent: SHA-1 of the raw bencoded `info` dict."""
+    """Compute qBittorrent's id for a .torrent: SHA-1 of the raw bencoded `info` dict.
+
+    Args:
+        torrent: The content of the .torrent file.
+
+    Returns:
+        The hash as 40 hex digits.
+
+    Raises:
+        HTTPException: 502 when the .torrent can't be read or has no `info`.
+    """
     try:
-        i = 1
+        # Walk the key/value pairs of the outer dict. The hash is over the bytes exactly as they are in the file,
+        # so what's needed is where the `info` value starts and ends, not its decoded content.
+        i = 1  # skip the "d" that opens the outer dict
         while torrent[i : i + 1] != b"e":
             key, i = _bdecode(torrent, i)
             start = i
@@ -349,8 +470,22 @@ MAGNET_HASH = re.compile(r"\bbtih:([0-9a-fA-F]{40})\b")
 
 
 def _qbit_add(magnet: str | None, torrent: bytes | None, job_id: int, skip: list[int]):
-    """Add to qBittorrent. Files listed in `skip` (indexes) get priority 0 = not downloaded.
-    qBittorrent rejects file priorities on upload, so add stopped, set them, then start."""
+    """Add a torrent to qBittorrent. Blocks, so run it in a thread.
+
+    qBittorrent rejects file priorities on upload, so a torrent with files to skip is added stopped, gets its
+    priorities set and is then started.
+
+    Args:
+        magnet: The magnet link, or None when `torrent` is given.
+        torrent: The content of the .torrent file, or None when `magnet` is given.
+        job_id: The job this download belongs to. It names the tag and the download folder.
+        skip: Indexes of the files that must not be downloaded (priority 0). Empty for a magnet link.
+
+    Raises:
+        HTTPException: 409 when qBittorrent already has this torrent. 502 when it refuses the torrent or the
+            file selection.
+        qbittorrentapi.APIError: If qBittorrent can't be reached or the login fails.
+    """
     q = _qbit()
     found = MAGNET_HASH.search(magnet) if magnet else None
     h = info_hash(torrent) if torrent else found and found.group(1).lower()
@@ -387,6 +522,7 @@ def _qbit_add(magnet: str | None, torrent: bytes | None, job_id: int, skip: list
 
 
 def _supported(path: str) -> bool:
+    """Whether a file is audio Varsis can play, going by its extension."""
     return Path(path).suffix.lower().lstrip(".") in MIME
 
 
@@ -395,20 +531,37 @@ LOW_QUALITY_COPY = re.compile(r"_(64kb|vbr|128kb|256kb|320kb)$", re.IGNORECASE) 
 
 
 def song_key(path: str) -> tuple[str, str]:
-    """Files with the same key are versions of the same song (e.g. Song.flac, Song.mp3, Song_64kb.mp3)."""
+    """Make the key that tells which files are versions of the same song (Song.flac, Song.mp3, Song_64kb.mp3).
+
+    Args:
+        path: A file's path inside the torrent.
+
+    Returns:
+        Its folder, and its name without the extension and without a low-quality marker, both in lower case.
+    """
     p = Path(path)
     return str(p.parent).lower(), LOW_QUALITY_COPY.sub("", p.stem).lower()
 
 
 def best_versions(paths: list[str]) -> list[int]:
-    """Indexes of the files to keep: per song (same folder + name) the best supported format,
-    ignoring archive.org's re-encoded copies when an original exists."""
+    """Choose one file per song: the best supported format.
+
+    A song is the files that share a folder and a name (see song_key()). Formats rank as in QUALITY, and
+    archive.org's re-encoded copies lose against any original.
+
+    Args:
+        paths: The paths of all files in the torrent.
+
+    Returns:
+        The indexes of the files to keep, in ascending order.
+    """
     best = {}  # (folder, name) -> (rank, index)
     for i, path in enumerate(paths):
         p = Path(path)
         ext = p.suffix.lower().lstrip(".")
         if ext not in MIME:
             continue
+        # Lower is better. A re-encoded copy is pushed behind every original, whatever its format.
         rank = QUALITY.index(ext) + (len(QUALITY) if LOW_QUALITY_COPY.search(p.stem) else 0)
         key = song_key(path)
         if key not in best or rank < best[key][0]:
@@ -417,12 +570,23 @@ def best_versions(paths: list[str]) -> list[int]:
 
 
 def wanted_files(paths: list[str], sizes: list[int]) -> list[int]:
-    """Indexes to download: best_versions(), plus the small cover pictures and XML/NFO files in the songs' folders
-    (or folders above them, or a cover in their Artwork/Scans subfolder) for album covers and missing tags."""
+    """Choose the files of a torrent to download.
+
+    That is best_versions(), plus the small cover pictures and XML/NFO files in the songs' folders (or folders above
+    them, or a cover in their Artwork/Scans subfolder) for album covers and missing tags.
+
+    Args:
+        paths: The paths of all files in the torrent.
+        sizes: Their sizes in bytes, in the same order.
+
+    Returns:
+        The indexes of the files to download, in ascending order.
+    """
     songs = best_versions(paths)
-    dirs = {d for i in songs for d in PurePosixPath(paths[i]).parents}
+    dirs = {d for i in songs for d in PurePosixPath(paths[i]).parents}  # every folder with a song in or below it
 
     def near_songs(p: PurePosixPath) -> bool:
+        """Whether a sidecar is where find() would use it: beside or above a song, or a cover in an art folder."""
         if p.parent in dirs:
             return True
         rank = sidecars.cover_rank(p)
@@ -439,6 +603,26 @@ def wanted_files(paths: list[str], sizes: list[int]) -> list[int]:
 
 @router.post("", status_code=201)
 async def add(data: AddTorrent, db: SessionDep, user: CurrentUser):
+    """Start downloading a search result.
+
+    With a .torrent link the contents are checked first: only the best version of each song is downloaded (plus
+    covers and metadata), and the songs must fit in the user's storage. A magnet link's contents aren't known yet,
+    so the poller stops it later if it turns out too big.
+
+    Args:
+        data: The search result.
+        db: Database session.
+        user: The logged-in user, who owns the download and whose storage it counts against.
+
+    Returns:
+        The new job (see job_out()).
+
+    Raises:
+        HTTPException: 403 when the user's storage is full or too small for the songs. 429 when they already
+            have MAX_ACTIVE downloads running. 413 when `info` is too big. 400 when the link isn't allowed or
+            the torrent has no supported audio. 409 when the torrent is already downloading. 502 when Prowlarr,
+            the indexer or qBittorrent fails.
+    """
     free = None if user.quota is None else user.quota - await storage_used(db, user.id)
     if free is not None and free <= 0:
         raise HTTPException(403, "Your storage is full. Ask an admin for more space.")
@@ -471,7 +655,7 @@ async def add(data: AddTorrent, db: SessionDep, user: CurrentUser):
             )
     job = TorrentJob(user_id=user.id, title=data.title, details=details or None)
     db.add(job)
-    await db.flush()
+    await db.flush()  # gives the job its id, which names the tag and folder; nothing is committed if adding fails
     try:
         await asyncio.to_thread(_qbit_add, magnet, torrent, job.id, skip)
     except qbittorrentapi.APIError as e:
@@ -485,7 +669,18 @@ async def add(data: AddTorrent, db: SessionDep, user: CurrentUser):
 
 @router.post("/files")
 async def files(data: TorrentUrl, _: CurrentUser):
-    """Files inside a search result's .torrent, and which ones a download would fetch."""
+    """List the files inside a search result's .torrent, and which ones a download would fetch.
+
+    Args:
+        data: The link of the search result.
+
+    Returns:
+        `files`, each with its path, size and `download`; `info_hash`; and `magnet`, which is true for a magnet
+        link, whose files can't be listed.
+
+    Raises:
+        HTTPException: 400 when the link isn't allowed, 502 when the .torrent can't be fetched or read.
+    """
     _, torrent = await _resolve(data.url)
     if not torrent:
         return {"magnet": True, "info_hash": None, "files": []}
@@ -500,6 +695,15 @@ async def files(data: TorrentUrl, _: CurrentUser):
 
 @router.get("")
 async def jobs(db: SessionDep, user: CurrentUser):
+    """List the user's downloads.
+
+    Args:
+        db: Database session.
+        user: The logged-in user.
+
+    Returns:
+        Their 100 most recent jobs, newest first (see job_out()).
+    """
     rows = await db.scalars(
         select(TorrentJob).where(TorrentJob.user_id == user.id).order_by(TorrentJob.id.desc()).limit(100)
     )
@@ -527,6 +731,18 @@ LIVE_FIELDS = [  # qBittorrent torrent properties shown on a download's info pag
 
 
 def _live(job_id: int):
+    """Ask qBittorrent how a job's torrent is doing right now. Blocks, so run it in a thread.
+
+    Args:
+        job_id: The job.
+
+    Returns:
+        The torrent's LIVE_FIELDS plus `files` with each file's progress. None when qBittorrent doesn't have the
+        torrent (any more).
+
+    Raises:
+        qbittorrentapi.APIError: If qBittorrent can't be reached.
+    """
     q = _qbit()
     t = next(iter(q.torrents_info(tag=_tag(job_id))), None)
     if t is None:
@@ -542,7 +758,20 @@ def _live(job_id: int):
 
 @router.get("/{job_id}")
 async def job_info(job_id: int, db: SessionDep, user: CurrentUser):
-    """One download, plus live qBittorrent stats while it's still in qBittorrent."""
+    """Get one download, plus live qBittorrent stats while it's still in qBittorrent.
+
+    Args:
+        job_id: The job.
+        db: Database session.
+        user: The logged-in user.
+
+    Returns:
+        The job (see job_out()) plus `live` (see _live()), which is None once the download is over or when
+        qBittorrent doesn't answer.
+
+    Raises:
+        HTTPException: 404 when the job doesn't exist or is someone else's.
+    """
     job = await db.get(TorrentJob, job_id)
     if job is None or job.user_id != user.id:
         raise HTTPException(404, "Download not found")
@@ -559,7 +788,13 @@ async def job_info(job_id: int, db: SessionDep, user: CurrentUser):
 
 
 async def _discard(qbit: qbittorrentapi.Client, job_id: int, torrent_hash: str | None):
-    """Best effort: remove a job's torrent from qBittorrent, and its download folder."""
+    """Best effort: remove a job's torrent from qBittorrent, and its download folder.
+
+    Args:
+        qbit: The qBittorrent client.
+        job_id: The job, which names the download folder.
+        torrent_hash: The torrent's id in qBittorrent. None when qBittorrent doesn't have it.
+    """
     if torrent_hash:
         with contextlib.suppress(qbittorrentapi.APIError):
             await asyncio.to_thread(qbit.torrents_delete, delete_files=True, torrent_hashes=torrent_hash)
@@ -567,7 +802,14 @@ async def _discard(qbit: qbittorrentapi.Client, job_id: int, torrent_hash: str |
 
 
 async def remove_user_torrents(db, user_id: int):
-    """Stop a user's running downloads (before their account is deleted: nothing would ever clean them up)."""
+    """Stop a user's running downloads (before their account is deleted: nothing would ever clean them up).
+
+    If qBittorrent can't be reached, that is logged and the account is deleted anyway.
+
+    Args:
+        db: Database session.
+        user_id: The user.
+    """
     ids = list(
         await db.scalars(select(TorrentJob.id).where(TorrentJob.user_id == user_id, TorrentJob.status.in_(ACTIVE)))
     )
@@ -586,7 +828,17 @@ async def remove_user_torrents(db, user_id: int):
 
 async def _import_job(db, job: TorrentJob, qbit: qbittorrentapi.Client, torrent_hash: str, stalled=False):
     """Import the finished audio files of a job (best version of each song), then remove the torrent.
-    `stalled`: the torrent stopped progressing, so import what finished and report the rest."""
+
+    Files that can't be imported are skipped and named in the job's message. The job's final status and message
+    are set here; the caller commits them.
+
+    Args:
+        db: Database session.
+        job: The job, already marked "importing".
+        qbit: The qBittorrent client.
+        torrent_hash: The torrent's id in qBittorrent.
+        stalled: The torrent stopped progressing, so import what finished and report the rest.
+    """
     job_id, user_id = job.id, job.user_id  # rollback() expires ORM objects; keep plain values
     user = await db.get(User, user_id)
     quota = user.quota if user else None
@@ -634,9 +886,18 @@ async def _import_job(db, job: TorrentJob, qbit: qbittorrentapi.Client, torrent_
 
 
 async def _stalled_with_files(qbit: qbittorrentapi.Client, job_id: int, t) -> bool:
-    """True when the torrent hasn't progressed for STALL_SECONDS and some wanted audio file is complete."""
+    """Whether the torrent hasn't progressed for STALL_SECONDS and some wanted audio file is complete.
+
+    Args:
+        qbit: The qBittorrent client.
+        job_id: The job.
+        t: The torrent as qBittorrent reports it.
+
+    Returns:
+        True when it is time to stop waiting and import what there is.
+    """
     last = _last_progress.get(job_id)
-    if last is None or t.progress > last[0]:
+    if last is None or t.progress > last[0]:  # first look, or it moved: restart the clock
         _last_progress[job_id] = (t.progress, time.monotonic())
         return False
     if time.monotonic() - last[1] < STALL_SECONDS:
@@ -646,8 +907,20 @@ async def _stalled_with_files(qbit: qbittorrentapi.Client, job_id: int, t) -> bo
 
 
 async def _too_big(db, job: TorrentJob, t) -> bool:
-    """True when the download is far bigger than the space its user has left. The size of a magnet link is only
-    known once qBittorrent has its file list, so this is checked while it downloads, not when it's added."""
+    """Whether the download is far bigger than the space its user has left.
+
+    The size of a magnet link is only known once qBittorrent has its file list, so this is checked while it
+    downloads, not when it's added.
+
+    Args:
+        db: Database session.
+        job: The job.
+        t: The torrent as qBittorrent reports it.
+
+    Returns:
+        True when its size is more than the user's free space plus SIZE_SLACK. Always False for a user without
+        a limit, and while the size isn't known.
+    """
     user = await db.get(User, job.user_id)
     if not user or user.quota is None or (t.size or 0) <= 0:
         return False
@@ -655,6 +928,17 @@ async def _too_big(db, job: TorrentJob, t) -> bool:
 
 
 async def _poll_job(db, qbit: qbittorrentapi.Client, job_id: int, t):
+    """Move one downloading job forward, going by the state of its torrent.
+
+    The job fails when the torrent is gone, broken or too big. It is imported when the torrent is complete or
+    has stalled with finished songs. Otherwise only its progress is updated.
+
+    Args:
+        db: Database session.
+        qbit: The qBittorrent client.
+        job_id: The job.
+        t: The torrent as qBittorrent reports it, None when qBittorrent doesn't have it.
+    """
     job = await db.get(TorrentJob, job_id)
     if job is None:  # its user was deleted meanwhile
         return
@@ -677,12 +961,21 @@ async def _poll_job(db, qbit: qbittorrentapi.Client, job_id: int, t):
         job.progress = t.progress
         await db.commit()
         return
+    # Every other branch ended the job: forget what was remembered about it and save its final state.
     _last_progress.pop(job_id, None)
     _failures.pop(job_id, None)
     await db.commit()
 
 
 async def poll_once():
+    """Check every downloading job against qBittorrent, one after the other.
+
+    A job that raises an unexpected error is tried again on the next poll, and given up after MAX_FAILURES errors
+    in a row.
+
+    Raises:
+        qbittorrentapi.APIError: If qBittorrent can't be reached.
+    """
     async with SessionLocal() as db:
         ids = list(await db.scalars(select(TorrentJob.id).where(TorrentJob.status == "downloading")))
         if not ids:
@@ -711,6 +1004,7 @@ async def poll_once():
 
 
 async def poll_forever():
+    """Run poll_once() every POLL_SECONDS until the task is cancelled. Started at app startup (see main.py)."""
     while True:
         try:
             await poll_once()
