@@ -1,8 +1,8 @@
-"""ORM models: User, Artist, Album, Track (+ track_artists), Playlist, PlaylistTrack, TorrentJob."""
+"""ORM models: User, Artist, Album, Track (+ track_artists), Playlist, PlaylistTrack."""
 
 from datetime import datetime
 
-from sqlalchemy import JSON, BigInteger, Column, DateTime, ForeignKey, String, Table, func
+from sqlalchemy import BigInteger, Column, DateTime, ForeignKey, String, Table, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .config import settings
@@ -100,24 +100,9 @@ class PlaylistTrack(Base):
     track: Mapped[Track] = relationship(lazy="selectin")
 
 
-class TorrentJob(Base):
-    """A torrent download a user started. The poller in torrents.py follows it until it is imported or fails."""
-
-    __tablename__ = "torrent_jobs"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    title: Mapped[str]
-    status: Mapped[str] = mapped_column(default="downloading")  # downloading | importing | done | failed
-    progress: Mapped[float] = mapped_column(default=0)  # 0 to 1, as qBittorrent reports it
-    message: Mapped[str | None]  # error or import summary
-    details: Mapped[dict | None] = mapped_column(JSON)  # search result info + the .torrent's file list
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
-
 # Run at startup after create_all: columns added after release (create_all doesn't add columns to existing
 # tables) and trigram indexes for fuzzy search.
 STARTUP_SQL = [
-    "ALTER TABLE torrent_jobs ADD COLUMN IF NOT EXISTS details JSON",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS name VARCHAR(100)",
     # Accounts from before admin approval existed start unapproved; ADMIN_EMAILS are approved at startup.
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_approved BOOLEAN NOT NULL DEFAULT false",

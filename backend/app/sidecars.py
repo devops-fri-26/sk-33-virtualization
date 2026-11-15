@@ -1,4 +1,4 @@
-"""Album info found next to audio files (an uploaded folder or a torrent's files).
+"""Album info found next to audio files (an uploaded folder, or files a plugin imports).
 
 That is front-cover pictures, archive.org's <item>_files.xml / <item>_meta.xml and Kodi/Jellyfin album.nfo. It only
 fills in what the audio file's own tags leave empty; these files aren't kept in the library.

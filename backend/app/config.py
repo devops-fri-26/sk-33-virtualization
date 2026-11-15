@@ -27,16 +27,7 @@ class Settings(BaseSettings):
     smtp_from: str = "varsis@localhost"
     smtp_tls: bool = False  # encrypt with STARTTLS; required when SMTP_USER is set (unless the port is 465)
 
-    prowlarr_url: str = "http://localhost:9696"
-    prowlarr_api_key: str = ""  # empty turns torrent search off
-    qbit_url: str = "http://localhost:8081"
-    qbit_user: str = "admin"
-    qbit_pass: str = ""
-
     music_dir: str = "/music"
-    # qBittorrent is told to save here and the backend reads the files from here, so both must see this folder
-    # under the same path.
-    downloads_dir: str = "/downloads"
     covers_dir: str = "/covers"
 
     @field_validator("secret_key")

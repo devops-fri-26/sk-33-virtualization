@@ -1,25 +1,27 @@
-"""FastAPI entry point: app, lifespan (DB setup, admins, torrent poller) and routers."""
+"""FastAPI entry point: app, lifespan (DB setup, admins, plugins) and routers."""
 
-import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from sqlalchemy import text, update
 
-from . import account, admin, auth, library, playlists, torrents
+from . import account, admin, auth, library, playlists, plugins
+from .auth import current_user
 from .config import settings
 from .db import Base, engine
 from .models import STARTUP_SQL, User
+
+plugins.load()  # before the lifespan runs: plugins add their tables, routes and hooks
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Set the app up before it takes requests, and clean up when it stops.
 
-    Before: create the storage folders and the database tables, run STARTUP_SQL, put imports that a restart
-    interrupted back in the queue, give ADMIN_EMAILS their rights and start the torrent poller. After: stop the
-    poller and close the database connections.
+    Before: create the storage folders and the database tables, run STARTUP_SQL (the app's, then each plugin's),
+    give ADMIN_EMAILS their rights and start the plugins. After: stop the plugins and close the database
+    connections.
 
     Args:
         app: The app being started (FastAPI passes it; not used).
@@ -31,19 +33,19 @@ async def lifespan(app: FastAPI):
         Path(d).mkdir(parents=True, exist_ok=True)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        for sql in STARTUP_SQL:
+        for sql in [*STARTUP_SQL, *(sql for sqls in plugins.each("STARTUP_SQL") for sql in sqls)]:
             await conn.execute(text(sql))
-        # A restart in the middle of an import left these behind; the poller finishes them (see _import_job).
-        await conn.execute(text("UPDATE torrent_jobs SET status = 'downloading' WHERE status = 'importing'"))
         if settings.admins:  # they still need a verified email to log in
             await conn.execute(
                 update(User)
                 .where(User.email.in_(settings.admins))
                 .values(is_admin=True, is_approved=True, is_disabled=False)
             )
-    poller = asyncio.create_task(torrents.poll_forever())
+    for startup in plugins.each("startup"):
+        await startup()
     yield
-    poller.cancel()
+    for shutdown in plugins.each("shutdown"):
+        await shutdown()
     await engine.dispose()
 
 
@@ -53,7 +55,10 @@ app.include_router(account.router)
 app.include_router(admin.router)
 app.include_router(library.router)
 app.include_router(playlists.router)
-app.include_router(torrents.router)
+for router in plugins.each("router"):  # login required, whether or not the plugin's routes ask for it themselves
+    app.include_router(router, dependencies=[Depends(current_user)])
+for router in plugins.each("public_router"):
+    app.include_router(router)
 
 
 @app.get("/api/health")

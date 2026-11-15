@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { setUnauthorizedHandler } from './api'
+import { routes as pluginRoutes } from './plugins'
 import { useAuth } from './stores/auth'
 import { usePlayer } from './stores/player'
 
@@ -10,9 +11,6 @@ const router = createRouter({
     { path: '/search', component: () => import('./views/Search.vue') },
     { path: '/library', component: () => import('./views/Library.vue') },
     { path: '/upload', component: () => import('./views/Upload.vue') },
-    { path: '/torrents', component: () => import('./views/Torrents.vue') },
-    { path: '/torrents/:jobId', component: () => import('./views/TorrentInfo.vue') },
-    { path: '/torrent-info/:id', component: () => import('./views/TorrentInfo.vue') },
     { path: '/album/:id', component: () => import('./views/Album.vue') },
     { path: '/artist/:id', component: () => import('./views/Artist.vue') },
     { path: '/playlist/:id', component: () => import('./views/Playlist.vue') },
@@ -24,6 +22,7 @@ const router = createRouter({
     { path: '/forgot-password', component: () => import('./views/ForgotPassword.vue'), meta: { public: true } },
     { path: '/reset-password', component: () => import('./views/ResetPassword.vue'), meta: { public: true } },
     { path: '/confirm-email', component: () => import('./views/ConfirmEmail.vue'), meta: { public: true } },
+    ...pluginRoutes,
   ],
 })
 

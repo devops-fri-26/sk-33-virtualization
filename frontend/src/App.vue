@@ -1,18 +1,17 @@
 <script setup>
-import { Download, House, Library, LogOut, Search, Settings, Shield, Upload } from 'lucide-vue-next'
+import { House, Library, LogOut, Search, Settings, Shield, Upload } from 'lucide-vue-next'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import PlayerBar from './components/PlayerBar.vue'
 import QueuePanel from './components/QueuePanel.vue'
 import Sidebar from './components/Sidebar.vue'
+import { pageChanged, nav as pluginNav } from './plugins'
 import { useAuth } from './stores/auth'
 import { usePlayer } from './stores/player'
-import { useTorrents } from './stores/torrents'
 import { useUi } from './stores/ui'
 
 const auth = useAuth()
 const player = usePlayer()
-const torrents = useTorrents()
 const ui = useUi()
 const route = useRoute()
 const router = useRouter()
@@ -23,12 +22,12 @@ const mobileNav = computed(() => [
   { to: '/search', label: 'Search', icon: Search },
   { to: '/library', label: 'Library', icon: Library },
   { to: '/upload', label: 'Upload', icon: Upload },
-  ...(torrents.available ? [{ to: '/torrents', label: 'Torrents', icon: Download }] : []),
+  ...pluginNav(),
 ])
 
 watch(() => route.path, () => main.value?.scrollTo(0, 0))
-// Re-check torrent services on each page change once logged in (the server caches the answer for 20 s).
-watch(() => [route.path, auth.user], () => auth.user && !route.meta.public && torrents.check(), { immediate: true })
+// Tell the plugins about each page change once logged in (e.g. to re-check that their service is reachable).
+watch(() => [route.path, auth.user], () => auth.user && !route.meta.public && pageChanged(), { immediate: true })
 
 function toggleUserMenu() {
   userMenu.value = !userMenu.value

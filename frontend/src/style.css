@@ -1,4 +1,6 @@
 @import "tailwindcss";
+/* Plugin folders are git-ignored, so Tailwind would skip the classes they use. */
+@source "./plugins/*";
 
 @theme {
   --color-accent: #1ed760;

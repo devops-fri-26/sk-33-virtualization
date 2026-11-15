@@ -650,7 +650,7 @@ async def set_artists(track_id: int, data: ArtistNames, db: SessionDep, user: Cu
     return track_out(track)
 
 
-def _gb(n: int) -> str:
+def gb(n: int) -> str:
     """Write a number of bytes as text in GB, e.g. "1.5 GB"."""
     return f"{n / GB:.1f} GB"
 
@@ -735,7 +735,7 @@ async def _upload(db: AsyncSession, files: list[UploadFile], paths: list[str], u
                     errors.append(
                         {
                             "file": shown,
-                            "error": f"Not enough storage left: you've used {_gb(used)} of {_gb(quota)}. "
+                            "error": f"Not enough storage left: you've used {gb(used)} of {gb(quota)}. "
                             "Ask an admin for more space.",
                         }
                     )
