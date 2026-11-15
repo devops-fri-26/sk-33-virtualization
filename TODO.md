@@ -5,14 +5,12 @@ your own machine. Sections are ordered by importance; inside a section, top item
 
 ## 1. Blockers: do these before anyone else gets the address
 
-- [ ] **HTTPS.** The app speaks plain HTTP on port 8080, so passwords and the login cookie travel unencrypted.
-      Put a reverse proxy with certificates in front (Caddy, Traefik, Cloudflare Tunnel), then:
-  - [ ] set `APP_URL` to the `https://` address (email links use it, and it turns on the cookie's `Secure` flag);
-  - [ ] uncomment `set_real_ip_from` / `real_ip_header` in `frontend/nginx.conf`, or every visitor shares one
-        login rate limit (they all look like the proxy);
-  - [ ] change the port mapping to `127.0.0.1:8080:80` if the proxy runs on the same machine, so the plain-HTTP
-        port isn't reachable from outside;
-  - [ ] turn on HSTS in the proxy.
+- [ ] **HTTPS.** `docker-compose.https.yml` puts Caddy with a Let's Encrypt certificate in front, sets `APP_URL`
+      to `https://DOMAIN`, closes the plain-HTTP port and sends HSTS; nginx takes the visitor's address from
+      Caddy. Left to do on the server (see "Deploy with HTTPS" in the README):
+  - [ ] point the domain's DNS record at the server and open ports 80 and 443;
+  - [ ] set `DOMAIN` in `.env` and start with the https file;
+  - [ ] check the certificate, the `Secure` cookie and that the login rate limit counts per visitor.
 - [ ] **Real email.** Replace Mailpit: set `SMTP_HOST/PORT/USER/PASS/FROM` and `SMTP_TLS=true`, remove the
       `mailpit` service from the compose file. Set up SPF/DKIM for the sender domain, or sign-up mails land in spam.
 - [ ] **Fresh secrets.** New `SECRET_KEY` and `POSTGRES_PASSWORD` for production (`openssl rand -hex 32`). Don't reuse the values from the development `.env`.

@@ -17,6 +17,13 @@ All data is stored in folders under `DATA_DIR` (default `/varsis`): `postgres`, 
 ### Plugins
 Optional features live in their own repositories and are added as plugins: a folder for the API (`backend/app/plugins/<name>/`) and one for the web app (`frontend/src/plugins/<name>/`). Without plugins the app runs as described here. How a plugin is written and built in: [backend](backend/app/plugins/README.md), [frontend](frontend/src/plugins/README.md).
 
+### Deploy with HTTPS
+On a server with a public address, add `docker-compose.https.yml` to either compose file:
+```bash
+docker compose -f docker-compose.yml -f docker-compose.https.yml up -d --build
+```
+It starts Caddy on ports 80 and 443, which gets a Let's Encrypt certificate for `DOMAIN` (set it in `.env`, e.g. `DOMAIN=music.example.com`) and renews it. The app is then only reachable at `https://DOMAIN`; port 8080 is closed. Before the first start, the domain's DNS record must point at the server and ports 80 and 443 must be open. Needs Docker Compose 2.24 or newer.
+
 ### Accounts
 - **Sign-up:** new users confirm their email, then an admin approves them (account menu → **Admin**). Admins get an email when someone is waiting, and the user gets one when approved.
 - **Admins:** the emails in `ADMIN_EMAILS` are admins and skip approval (they still confirm their email). Admins can make other users admins.
