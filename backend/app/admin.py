@@ -4,12 +4,12 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select, update
 
+from . import plugins
 from .auth import AdminUser
 from .config import settings
 from .db import SessionDep
 from .mail import send_mail
 from .models import Track, User
-from .torrents import remove_user_torrents
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -136,7 +136,8 @@ async def delete_user(user_id: int, db: SessionDep, admin: AdminUser):
     user = await db.get(User, user_id)
     if not user:
         raise HTTPException(404, "User not found")
-    await remove_user_torrents(db, user_id)
+    for delete_user in plugins.each("delete_user"):  # e.g. stop what the user has running
+        await delete_user(db, user_id)
     # tracks.uploaded_by has no ON DELETE rule, so the database would refuse the delete while tracks point here.
     await db.execute(update(Track).where(Track.uploaded_by == user_id).values(uploaded_by=None))
     await db.delete(user)

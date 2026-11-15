@@ -218,3 +218,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Plugins come from their own repositories (see backend/app/plugins/README.md)
+/backend/app/plugins/*
+!/backend/app/plugins/__init__.py
+!/backend/app/plugins/README.md
+/frontend/src/plugins/*
+!/frontend/src/plugins/README.md
