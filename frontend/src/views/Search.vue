@@ -2,7 +2,7 @@
 import { Search as SearchIcon, X } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { api, coverUrl } from '../api'
+import { api, coverUrl, trackCoverUrl } from '../api'
 import Card from '../components/Card.vue'
 import Cover from '../components/Cover.vue'
 import PlayButton from '../components/PlayButton.vue'
@@ -47,7 +47,7 @@ const top = computed(() => {
   const candidates = [
     artist && { kind: 'artist', id: artist.id, title: artist.name, label: 'Artist', to: `/artist/${artist.id}`, round: true },
     album && { kind: 'album', id: album.id, title: album.title, label: `Album · ${album.artist?.name ?? ''}`, image: coverUrl(album), to: `/album/${album.id}` },
-    track && { kind: 'track', title: track.title, label: `Song · ${names(track)}`, image: coverUrl(track.album), to: track.album ? `/album/${track.album.id}` : '/search' },
+    track && { kind: 'track', title: track.title, label: `Song · ${names(track)}`, image: trackCoverUrl(track), to: track.album ? `/album/${track.album.id}` : '/search' },
   ].filter(Boolean)
   return candidates.find((c) => c.title.toLowerCase().includes(query.value.toLowerCase())) ?? candidates[0] ?? null
 })

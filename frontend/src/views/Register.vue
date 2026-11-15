@@ -9,6 +9,12 @@ const password = ref('')
 const sent = ref(false)
 const error = ref('')
 const busy = ref(false)
+const resent = ref(false)
+
+async function resend() {
+  await api('/auth/resend-verification', { method: 'POST', body: { email: email.value } }).catch(() => {})
+  resent.value = true
+}
 
 async function submit() {
   error.value = ''
@@ -28,7 +34,12 @@ async function submit() {
   <AuthLayout :title="sent ? 'Check your email' : 'Sign up for Varsis'">
     <div v-if="sent" class="text-center text-muted">
       <MailCheck class="mx-auto mb-4 h-12 w-12 text-accent" />
-      We sent a verification link to <span class="font-bold text-white">{{ email }}</span>. Open it to activate your account.
+      We sent a verification link to <span class="font-bold text-white">{{ email }}</span>. Open it to confirm your email.
+      After that, an admin has to approve your account. We'll email you when they do.
+      <p class="mt-6 text-sm">
+        <span v-if="resent">Sent again.</span>
+        <template v-else>Didn't get it? <button class="font-bold text-white underline" @click="resend">Send it again</button></template>
+      </p>
     </div>
     <form v-else class="space-y-4" @submit.prevent="submit">
       <label class="block text-sm font-bold">Email<input v-model="email" type="email" required autocomplete="email" :class="input" class="mt-2 font-normal" /></label>
