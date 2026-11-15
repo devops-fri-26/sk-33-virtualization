@@ -6,12 +6,10 @@ import { api, coverUrl, trackCoverUrl } from '../api'
 import Card from '../components/Card.vue'
 import Cover from '../components/Cover.vue'
 import PlayButton from '../components/PlayButton.vue'
-import TorrentSearch from '../components/TorrentSearch.vue'
 import TrackList from '../components/TrackList.vue'
+import { searchSections } from '../plugins'
 import { usePlayer } from '../stores/player'
-import { useTorrents } from '../stores/torrents'
 
-const torrents = useTorrents()
 const route = useRoute()
 const router = useRouter()
 const player = usePlayer()
@@ -75,13 +73,13 @@ const empty = computed(() => results.value && !results.value.tracks.length && !r
     <div v-if="!query" class="mt-20 flex flex-col items-center text-center">
       <SearchIcon class="mb-4 h-14 w-14 text-muted" />
       <h2 class="text-2xl font-bold">Search your library</h2>
-      <p class="mt-2 text-muted">Find songs, albums and artists.<template v-if="torrents.available"> Not there? Search torrents right from the results.</template></p>
+      <p class="mt-2 text-muted">Find songs, albums and artists.</p>
     </div>
 
     <template v-else-if="results">
       <div v-if="empty" class="mt-12 mb-10 text-center">
         <h2 class="text-2xl font-bold">No results found for “{{ query }}”</h2>
-        <p class="mt-2 text-muted">Check the spelling{{ torrents.available ? ', try fewer words, or search torrents below.' : ' or try fewer words.' }}</p>
+        <p class="mt-2 text-muted">Check the spelling or try fewer words.</p>
       </div>
 
       <div v-if="top" class="mt-4 mb-8 grid gap-6 lg:grid-cols-[2fr_3fr]">
@@ -140,7 +138,7 @@ const empty = computed(() => results.value && !results.value.tracks.length && !r
         <TrackList :tracks="results.tracks" :source="source" />
       </section>
 
-      <TorrentSearch v-if="torrents.available" :key="query" :q="query" />
+      <component :is="section" v-for="(section, i) in searchSections" :key="`${i}:${query}`" :q="query" />
     </template>
   </div>
 </template>

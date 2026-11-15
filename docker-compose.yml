@@ -1,4 +1,4 @@
-# All data lives in folders under DATA_DIR (default /varsis): postgres, music, covers, downloads, prowlarr, qbittorrent.
+# All data lives in folders under DATA_DIR (default /varsis): postgres, music, covers.
 services:
   db:
     image: postgres:17
@@ -25,7 +25,6 @@ services:
       db: { condition: service_healthy }
     volumes:
       - ${DATA_DIR:-/varsis}/music:/music
-      - ${DATA_DIR:-/varsis}/downloads:/downloads
       - ${DATA_DIR:-/varsis}/covers:/covers
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
@@ -41,52 +40,3 @@ services:
     image: axllent/mailpit:v1.33.0
     restart: unless-stopped
     ports: ["127.0.0.1:8025:8025", "127.0.0.1:1025:1025"]
-
-  prowlarr:
-    image: lscr.io/linuxserver/prowlarr:2.7.0.5723-ls167
-    restart: unless-stopped
-    environment: { PUID: "1000", PGID: "1000", TZ: "${TZ:-Europe/Ljubljana}" }
-    volumes: ["${DATA_DIR:-/varsis}/prowlarr:/config"]
-    ports: ["127.0.0.1:9696:9696"]
-
-  # Solves Cloudflare challenges for Prowlarr indexers (e.g. bt.etree.org).
-  # In Prowlarr: Settings → Indexers → add FlareSolverr proxy at http://flaresolverr:8191, tag it, tag the indexer.
-  flaresolverr:
-    image: ghcr.io/flaresolverr/flaresolverr:v3.5.2
-    restart: unless-stopped
-    environment: { LOG_LEVEL: info, TZ: "${TZ:-Europe/Ljubljana}" }
-
-  # Proton VPN tunnel for torrent traffic only. qBittorrent shares this container's network,
-  # so it has no internet if the VPN is down (kill switch).
-  gluetun:
-    image: qmcgaw/gluetun:v3
-    restart: unless-stopped
-    cap_add: [NET_ADMIN]
-    devices: [/dev/net/tun:/dev/net/tun]
-    environment:
-      VPN_SERVICE_PROVIDER: protonvpn
-      VPN_TYPE: wireguard
-      WIREGUARD_PRIVATE_KEY: ${WIREGUARD_PRIVATE_KEY:?set WIREGUARD_PRIVATE_KEY in .env}
-      PORT_FORWARD_ONLY: "on" # only P2P servers with port forwarding
-      SERVER_COUNTRIES: ${VPN_COUNTRIES:-Austria,Italy,Hungary,Croatia,Switzerland,Germany} # nearby = faster
-      VPN_PORT_FORWARDING: "on"
-      # Tell qBittorrent which port Proton forwarded (needs localhost auth bypass in qBittorrent)
-      VPN_PORT_FORWARDING_UP_COMMAND: >-
-        /bin/sh -c 'wget -O- --retry-connrefused --post-data "json={\"listen_port\":{{PORTS}}}" http://127.0.0.1:8081/api/v2/app/setPreferences 2>&1'
-      TZ: ${TZ:-Europe/Ljubljana}
-    ports: ["127.0.0.1:8081:8081"] # qBittorrent web UI
-    networks:
-      default:
-        aliases: [qbittorrent] # backend keeps using http://qbittorrent:8081
-
-  qbittorrent:
-    image: lscr.io/linuxserver/qbittorrent:5.3.0_v2.1.2-ls486
-    network_mode: service:gluetun
-    # Start with gluetun even while the VPN is still connecting (no internet until it's up = kill switch).
-    depends_on:
-      gluetun: { condition: service_started }
-    restart: unless-stopped
-    environment: { PUID: "1000", PGID: "1000", TZ: "${TZ:-Europe/Ljubljana}", WEBUI_PORT: "8081" }
-    volumes:
-      - ${DATA_DIR:-/varsis}/qbittorrent:/config
-      - ${DATA_DIR:-/varsis}/downloads:/downloads
