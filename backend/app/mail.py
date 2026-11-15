@@ -14,7 +14,15 @@ log = logging.getLogger("varsis.mail")
 
 
 async def send_mail(to: str, subject: str, body: str):
-    """Send a plain-text email. Runs as a background task, so failures are logged instead of raised."""
+    """Send a plain-text email.
+
+    Runs as a background task, so failures are logged instead of raised.
+
+    Args:
+        to: The recipient's address.
+        subject: The subject line.
+        body: The text of the email.
+    """
     msg = EmailMessage()
     msg["From"], msg["To"], msg["Subject"] = settings.smtp_from, to, subject
     msg.set_content(body)
@@ -35,4 +43,12 @@ async def send_mail(to: str, subject: str, body: str):
 
 
 async def admin_emails(db: AsyncSession) -> list[str]:
+    """Find who to notify about things that need an admin.
+
+    Args:
+        db: Database session.
+
+    Returns:
+        The email addresses of the admins that are approved and not disabled.
+    """
     return list(await db.scalars(select(User.email).where(User.is_admin, User.is_approved, ~User.is_disabled)))

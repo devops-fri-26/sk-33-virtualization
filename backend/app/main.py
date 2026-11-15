@@ -15,6 +15,18 @@ from .models import STARTUP_SQL, User
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Set the app up before it takes requests, and clean up when it stops.
+
+    Before: create the storage folders and the database tables, run STARTUP_SQL, put imports that a restart
+    interrupted back in the queue, give ADMIN_EMAILS their rights and start the torrent poller. After: stop the
+    poller and close the database connections.
+
+    Args:
+        app: The app being started (FastAPI passes it; not used).
+
+    Yields:
+        Nothing. The app serves requests between the two halves.
+    """
     for d in (settings.music_dir, settings.covers_dir):
         Path(d).mkdir(parents=True, exist_ok=True)
     async with engine.begin() as conn:
@@ -46,4 +58,9 @@ app.include_router(torrents.router)
 
 @app.get("/api/health")
 async def health():
+    """Tell a monitor that the backend process is up. Needs no login and doesn't touch the database.
+
+    Returns:
+        Always `{"ok": true}`.
+    """
     return {"ok": True}

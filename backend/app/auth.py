@@ -53,41 +53,80 @@ PasswordIn = Annotated[str, Field(min_length=1, max_length=256)]
 
 
 class Credentials(BaseModel):
+    """Sign-up form: an email and a password that meets the rules for new passwords."""
+
     email: Email
     password: Password
 
 
 class Login(BaseModel):
+    """Login form. The password is only checked here, so the rules for new passwords don't apply."""
+
     email: Email
     password: PasswordIn
 
 
 class EmailIn(BaseModel):
+    """A request that carries only an email address."""
+
     email: Email
 
 
 class NewPassword(BaseModel):
+    """Password reset: the token from the emailed link and the new password."""
+
     token: str
     password: Password
 
 
 async def hash_password(password: str) -> str:
-    """Argon2 takes ~100 ms of CPU: run it in a thread so it doesn't freeze every other request (and playback)."""
+    """Hash a password with Argon2.
+
+    Argon2 takes ~100 ms of CPU: it runs in a thread so it doesn't freeze every other request (and playback).
+
+    Args:
+        password: The password as the user typed it.
+
+    Returns:
+        The hash to store in `User.password_hash`.
+    """
     return await asyncio.to_thread(hasher.hash, password)
 
 
 async def verify_password(password: str, password_hash: str) -> bool:
+    """Check a password against a stored hash, in a thread like hash_password().
+
+    Args:
+        password: The password as the user typed it.
+        password_hash: The stored hash.
+
+    Returns:
+        True if the password is the one that was hashed.
+    """
     return await asyncio.to_thread(hasher.verify, password, password_hash)
 
 
 def limit_mail(request: Request, to: str):
-    """Rate limits for endpoints that send an email to an address the caller typed."""
+    """Count one email against the limits, for endpoints that send to an address the caller typed.
+
+    Args:
+        request: The incoming request; its IP address is limited.
+        to: The address the email would go to.
+
+    Raises:
+        HTTPException: 429 when this caller, this address or the whole server has sent too many emails.
+    """
     mail_ip.hit(client_ip(request))
     mail_to.hit(to)
     mail_all.hit("all")
 
 
 def invalid_link():
+    """Build the error for an email link that is forged, expired or already used.
+
+    Returns:
+        A 400 HTTPException for the caller to raise.
+    """
     return HTTPException(400, "This link is invalid or has expired")
 
 
@@ -95,6 +134,15 @@ def invalid_link():
 
 
 def start_session(response: Response, user: User):
+    """Log a user in by setting the session cookie.
+
+    The cookie is a signed token (JWT) with the user's id and session_version, good for SESSION_DAYS. JavaScript
+    can't read it (HttpOnly).
+
+    Args:
+        response: The response that carries the cookie to the browser.
+        user: The user to log in.
+    """
     exp = datetime.now(UTC) + timedelta(days=SESSION_DAYS)
     claims = {"sub": str(user.id), "ver": user.session_version, "exp": exp}
     response.set_cookie(
@@ -108,14 +156,33 @@ def start_session(response: Response, user: User):
 
 
 def end_session(response: Response):
+    """Log out of this browser by deleting the session cookie.
+
+    Args:
+        response: The response that tells the browser to delete it.
+    """
     response.delete_cookie(COOKIE, httponly=True, samesite="lax", secure=settings.app_url.startswith("https"))
 
 
 def can_log_in(user: User) -> bool:
+    """Whether an account may be used: its email is verified, an admin approved it and it isn't disabled."""
     return user.is_verified and user.is_approved and not user.is_disabled
 
 
 async def current_user(db: SessionDep, session: Annotated[str | None, Cookie()] = None) -> User:
+    """FastAPI dependency: the user the session cookie belongs to.
+
+    Args:
+        db: Database session.
+        session: The value of the session cookie, None when the browser sent none.
+
+    Returns:
+        The logged-in user.
+
+    Raises:
+        HTTPException: 401 when the cookie is missing, forged or expired, when the account may no longer log
+            in, or when the session was ended by "log out everywhere" or a password change.
+    """
     try:
         claims = jwt.decode(session or "", settings.secret_key, algorithms=["HS256"])
         uid, version = int(claims["sub"]), claims.get("ver", 0)
@@ -128,24 +195,55 @@ async def current_user(db: SessionDep, session: Annotated[str | None, Cookie()] 
     return user
 
 
+# Route parameter type: `user: CurrentUser` makes the route need a login. Named `_` where only the check matters.
 CurrentUser = Annotated[User, Depends(current_user)]
 
 
 async def current_admin(user: CurrentUser) -> User:
+    """FastAPI dependency: the logged-in user, who must be an admin.
+
+    Args:
+        user: The logged-in user.
+
+    Returns:
+        The same user.
+
+    Raises:
+        HTTPException: 403 when they aren't an admin.
+    """
     if not user.is_admin:
         raise HTTPException(403, "Only admins can do this")
     return user
 
 
+# Route parameter type: `admin: AdminUser` makes the route admin-only.
 AdminUser = Annotated[User, Depends(current_admin)]
 
 
 async def storage_used(db: AsyncSession, user_id: int) -> int:
-    """Bytes of audio this user uploaded (counts against their quota)."""
+    """Add up the audio a user uploaded, which is what counts against their quota.
+
+    Args:
+        db: Database session.
+        user_id: The user.
+
+    Returns:
+        The total size of their tracks in bytes, 0 when they have none.
+    """
     return await db.scalar(select(func.coalesce(func.sum(Track.size), 0)).where(Track.uploaded_by == user_id))
 
 
 async def user_out(db: AsyncSession, user: User) -> dict:
+    """Describe an account the way the frontend gets it.
+
+    Args:
+        db: Database session.
+        user: The account.
+
+    Returns:
+        Its id, email, name, admin flag, quota and used storage in bytes, and whether a storage request is
+        open. For admins also `admin_alerts`: how many accounts are waiting for something from an admin.
+    """
     out = {
         "id": user.id,
         "email": user.email,
@@ -165,12 +263,35 @@ async def user_out(db: AsyncSession, user: User) -> dict:
 
 
 async def send_verification(email: str):
+    """Email the link that proves the address belongs to whoever signed up. It works for 24 hours.
+
+    Args:
+        email: The address to verify.
+    """
     link = f"{settings.app_url}/verify?token={verify_tokens.dumps(email)}"
     await send_mail(email, "Verify your Varsis account", f"Confirm your email: {link}\n\nThe link works for 24 hours.")
 
 
 @router.post("/register", status_code=201)
 async def register(data: Credentials, request: Request, db: SessionDep, tasks: BackgroundTasks):
+    """Create an account and email its verification link.
+
+    The answer is the same whether or not the address already has an account, so this form can't be used to find
+    out who is registered. Addresses in ADMIN_EMAILS start as approved admins; everyone else also has to be
+    approved by an admin after verifying.
+
+    Args:
+        data: The email and password.
+        request: The incoming request, for the limit per IP address.
+        db: Database session.
+        tasks: Sends the email after the response has gone out.
+
+    Returns:
+        A message that tells the user to check their email.
+
+    Raises:
+        HTTPException: 429 after too many sign-ups or emails.
+    """
     signup_ip.hit(client_ip(request))
     signup_all.hit("all")
     email = data.email.lower()
@@ -205,6 +326,21 @@ async def register(data: Credentials, request: Request, db: SessionDep, tasks: B
 
 @router.post("/verify")
 async def verify(token: str, db: SessionDep, tasks: BackgroundTasks):
+    """Mark an email as verified: the link from the sign-up email.
+
+    The first time, the admins are emailed that an account is waiting, unless it is approved already.
+
+    Args:
+        token: The token from the link.
+        db: Database session.
+        tasks: Sends the emails after the response has gone out.
+
+    Returns:
+        A message for the user, and `approved`: whether they can log in now.
+
+    Raises:
+        HTTPException: 400 when the link is forged or older than 24 hours, or its account no longer exists.
+    """
     try:
         email = verify_tokens.loads(token, max_age=DAY)
     except BadSignature:  # includes SignatureExpired
@@ -233,6 +369,20 @@ async def verify(token: str, db: SessionDep, tasks: BackgroundTasks):
 
 @router.post("/resend-verification")
 async def resend_verification(data: EmailIn, request: Request, db: SessionDep, tasks: BackgroundTasks):
+    """Send a new verification link to an account that isn't verified yet.
+
+    Args:
+        data: The account's email.
+        request: The incoming request, for the limit per IP address.
+        db: Database session.
+        tasks: Sends the email after the response has gone out.
+
+    Returns:
+        The same message whether or not such an account exists.
+
+    Raises:
+        HTTPException: 429 after too many emails.
+    """
     email = data.email.lower()
     limit_mail(request, email)
     user = await db.scalar(select(User).where(User.email == email))
@@ -243,10 +393,26 @@ async def resend_verification(data: EmailIn, request: Request, db: SessionDep, t
 
 @router.post("/login")
 async def login(data: Login, request: Request, db: SessionDep, response: Response):
+    """Check an email and password and start a session.
+
+    Args:
+        data: The email and password.
+        request: The incoming request, for the limit per IP address.
+        db: Database session.
+        response: Gets the session cookie.
+
+    Returns:
+        The account (see user_out()).
+
+    Raises:
+        HTTPException: 401 for a wrong email or password. 403 when the account isn't verified, is disabled or
+            isn't approved yet. 429 after too many attempts.
+    """
     email = data.email.lower()
     login_ip.hit(client_ip(request))
     login_email.hit(email)
     user = await db.scalar(select(User).where(User.email == email))
+    # The password check runs first, and against DUMMY_HASH for an unknown email (see its comment above).
     if not await verify_password(data.password, user.password_hash if user else DUMMY_HASH) or not user:
         raise HTTPException(401, "Wrong email or password")
     if not user.is_verified:
@@ -261,17 +427,48 @@ async def login(data: Login, request: Request, db: SessionDep, response: Respons
 
 @router.post("/logout")
 async def logout(response: Response):
+    """Log out of this browser. Other devices stay logged in.
+
+    Args:
+        response: Tells the browser to delete the session cookie.
+
+    Returns:
+        A confirmation message.
+    """
     end_session(response)
     return {"detail": "Logged out"}
 
 
 @router.get("/me")
 async def me(db: SessionDep, user: CurrentUser):
+    """Tell the frontend who is logged in. It answers 401 when nobody is.
+
+    Args:
+        db: Database session.
+        user: The logged-in user.
+
+    Returns:
+        The account (see user_out()).
+    """
     return await user_out(db, user)
 
 
 @router.post("/forgot-password")
 async def forgot_password(data: EmailIn, request: Request, db: SessionDep, tasks: BackgroundTasks):
+    """Email a link for setting a new password. It works for one hour.
+
+    Args:
+        data: The account's email.
+        request: The incoming request, for the limit per IP address.
+        db: Database session.
+        tasks: Sends the email after the response has gone out.
+
+    Returns:
+        The same message whether or not an account with that email exists.
+
+    Raises:
+        HTTPException: 429 after too many emails.
+    """
     email = data.email.lower()
     limit_mail(request, email)
     user = await db.scalar(select(User).where(User.email == email))
@@ -290,6 +487,20 @@ async def forgot_password(data: EmailIn, request: Request, db: SessionDep, tasks
 
 @router.post("/reset-password")
 async def reset_password(data: NewPassword, db: SessionDep):
+    """Set a new password with the link from the reset email.
+
+    This logs out every device and also counts as verifying the email.
+
+    Args:
+        data: The token from the link and the new password.
+        db: Database session.
+
+    Returns:
+        A confirmation message.
+
+    Raises:
+        HTTPException: 400 when the link is forged, older than an hour or was used already.
+    """
     try:
         claims = reset_tokens.loads(data.token, max_age=HOUR)
     except BadSignature:
@@ -306,7 +517,19 @@ async def reset_password(data: NewPassword, db: SessionDep):
 
 @router.post("/confirm-email")
 async def confirm_email(token: str, db: SessionDep):
-    """Second step of changing the email (account settings): the link sent to the new address."""
+    """Second step of changing the email (account settings): the link sent to the new address.
+
+    Args:
+        token: The token from the link.
+        db: Database session.
+
+    Returns:
+        A message that names the new email.
+
+    Raises:
+        HTTPException: 400 when the link is forged, older than 24 hours or was used already, or when another
+            account has taken the address meanwhile.
+    """
     try:
         claims = email_tokens.loads(token, max_age=DAY)
     except BadSignature:

@@ -9,8 +9,9 @@ from .config import settings
 from .db import Base
 
 GB = 1024**3
-DEFAULT_QUOTA = int(settings.default_quota_gb * GB)
+DEFAULT_QUOTA = int(settings.default_quota_gb * GB)  # bytes
 
+# Which artists a track has (many-to-many). A row disappears with its track or its artist.
 track_artists = Table(
     "track_artists",
     Base.metadata,
@@ -20,6 +21,8 @@ track_artists = Table(
 
 
 class User(Base):
+    """An account. It can log in once it is verified and approved, and as long as it isn't disabled."""
+
     __tablename__ = "users"
     id: Mapped[int] = mapped_column(primary_key=True)
     email: Mapped[str] = mapped_column(String(320), unique=True)
@@ -37,12 +40,16 @@ class User(Base):
 
 
 class Artist(Base):
+    """A performer, shared by every track and album that names it. Removed when nothing names it any more."""
+
     __tablename__ = "artists"
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(unique=True)
 
 
 class Album(Base):
+    """An album. Imports treat title + album artist as its identity; it is removed with its last track."""
+
     __tablename__ = "albums"
     id: Mapped[int] = mapped_column(primary_key=True)
     title: Mapped[str]
@@ -53,24 +60,28 @@ class Album(Base):
 
 
 class Track(Base):
+    """One audio file in the library, with what its tags said when it was imported."""
+
     __tablename__ = "tracks"
     id: Mapped[int] = mapped_column(primary_key=True)
     title: Mapped[str]
     album_id: Mapped[int | None] = mapped_column(ForeignKey("albums.id"))
     cover: Mapped[str | None]  # own picture in covers_dir, for tracks without an album
     track_no: Mapped[int | None]
-    duration: Mapped[float] = mapped_column(default=0)
+    duration: Mapped[float] = mapped_column(default=0)  # seconds
     format: Mapped[str]  # file extension, e.g. "flac"
-    mime: Mapped[str]
-    path: Mapped[str] = mapped_column(unique=True)
-    size: Mapped[int]
-    uploaded_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
-    needs_artists: Mapped[bool] = mapped_column(default=False)
+    mime: Mapped[str]  # Content-Type the file is served with
+    path: Mapped[str] = mapped_column(unique=True)  # where the file is, inside music_dir
+    size: Mapped[int]  # bytes; counts against the uploader's quota
+    uploaded_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))  # None once that account is deleted
+    needs_artists: Mapped[bool] = mapped_column(default=False)  # no artist in its tags: the uploader is asked
     album: Mapped[Album | None] = relationship(lazy="selectin")
     artists: Mapped[list[Artist]] = relationship(secondary=track_artists, lazy="selectin")
 
 
 class Playlist(Base):
+    """A list of tracks that only its owner can see. Its entries are PlaylistTrack rows."""
+
     __tablename__ = "playlists"
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str]
@@ -85,17 +96,19 @@ class PlaylistTrack(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     playlist_id: Mapped[int] = mapped_column(ForeignKey("playlists.id", ondelete="CASCADE"), index=True)
     track_id: Mapped[int] = mapped_column(ForeignKey("tracks.id", ondelete="CASCADE"))
-    position: Mapped[int]
+    position: Mapped[int]  # order inside the playlist, starting at 1
     track: Mapped[Track] = relationship(lazy="selectin")
 
 
 class TorrentJob(Base):
+    """A torrent download a user started. The poller in torrents.py follows it until it is imported or fails."""
+
     __tablename__ = "torrent_jobs"
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     title: Mapped[str]
     status: Mapped[str] = mapped_column(default="downloading")  # downloading | importing | done | failed
-    progress: Mapped[float] = mapped_column(default=0)
+    progress: Mapped[float] = mapped_column(default=0)  # 0 to 1, as qBittorrent reports it
     message: Mapped[str | None]  # error or import summary
     details: Mapped[dict | None] = mapped_column(JSON)  # search result info + the .torrent's file list
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

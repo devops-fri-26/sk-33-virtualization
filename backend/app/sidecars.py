@@ -1,6 +1,8 @@
-"""Album info found next to audio files (an uploaded folder or a torrent's files): front-cover pictures,
-archive.org's <item>_files.xml / <item>_meta.xml and Kodi/Jellyfin album.nfo. It only fills in what the audio
-file's own tags leave empty; these files aren't kept in the library."""
+"""Album info found next to audio files (an uploaded folder or a torrent's files).
+
+That is front-cover pictures, archive.org's <item>_files.xml / <item>_meta.xml and Kodi/Jellyfin album.nfo. It only
+fills in what the audio file's own tags leave empty; these files aren't kept in the library.
+"""
 
 import re
 import xml.etree.ElementTree as ET
@@ -22,6 +24,8 @@ NUMBER = re.compile(r"^\s*(\d{1,3})(?!\d)")  # "03 - Song.flac" -> 3
 
 @dataclass
 class Extras:
+    """What the files around one audio file add to it. This is the result of find()."""
+
     tags: dict[str, str] = field(default_factory=dict)  # title, artist, album, albumartist, date, tracknumber
     cover: Path | None = None  # picture for the album (or for the track, when it has no album)
 
@@ -36,11 +40,21 @@ class _Xml:
 
 
 def suffix(name: str | PurePath) -> str:
+    """Get a file's extension in lower case and without the dot ("" when it has none)."""
     return PurePath(name).suffix.lower().lstrip(".")
 
 
 def cover_rank(name: str | PurePath) -> int | None:
-    """How likely a picture is the front cover: lower is better, None = it's something else (back, booklet…)."""
+    """Judge from a picture's file name how likely it is the front cover.
+
+    Args:
+        name: The picture's name or path.
+
+    Returns:
+        A rank where lower is better: the position in COVER_NAMES for exactly those names, NAMED for other names
+        that say cover, front or folder, PLAIN for any other picture. None when the name says it's something
+        else (back, booklet, a disc photo…).
+    """
     stem = PurePath(name).stem.lower()
     words = set(re.findall(r"[a-z]+", stem))
     if words & NOT_COVER or DISC.match(stem):
@@ -51,12 +65,13 @@ def cover_rank(name: str | PurePath) -> int | None:
 
 
 def useful(name: str | PurePath) -> bool:
-    """A sidecar worth reading: XML/NFO, or a picture that could be a front cover."""
+    """Whether a file is a sidecar worth reading: XML/NFO, or a picture that could be a front cover."""
     ext = suffix(name)
     return ext in ("xml", "nfo") or (ext in IMAGES and cover_rank(name) is not None)
 
 
 def _text(el: ET.Element, tag: str) -> str | None:
+    """Get the text of an element's child `tag`, or None when the child is missing or empty."""
     found = el.find(tag)
     if found is None or not found.text:
         return None
@@ -64,6 +79,14 @@ def _text(el: ET.Element, tag: str) -> str | None:
 
 
 def _parse(path: Path) -> ET.Element | None:
+    """Parse an XML file that came from a stranger.
+
+    Args:
+        path: The file.
+
+    Returns:
+        Its root element. None when the file can't be read, isn't XML, or uses a DOCTYPE or ENTITY.
+    """
     try:
         data = path.read_bytes()
     except OSError:
@@ -79,6 +102,16 @@ def _parse(path: Path) -> ET.Element | None:
 
 
 def _read(path: Path, into: _Xml):
+    """Read one XML/NFO file and add what it says to its folder's info.
+
+    Three formats are understood, told apart by the root element: archive.org's `<files>` and `<metadata>`, and
+    the `<album>` of a Kodi/Jellyfin album.nfo. Anything else is ignored. Album tags and track titles that an
+    earlier file already set are kept.
+
+    Args:
+        path: The file to read.
+        into: The folder's info so far; it is changed in place.
+    """
     root = _parse(path)
     if root is None:
         return
@@ -110,10 +143,20 @@ def _read(path: Path, into: _Xml):
 
 
 def _cover(folder: Path, images: dict[Path, list[Path]]) -> Path | None:
-    """Front cover for the audio in `folder`: a picture named like one (in the folder, else in an Artwork/Scans
-    subfolder), else the folder's only picture."""
+    """Pick the front cover for the audio in `folder`.
+
+    Args:
+        folder: The folder the audio files are in.
+        images: Every picture that came along, grouped by the folder it is in.
+
+    Returns:
+        A picture named like a cover (in the folder, else in an Artwork/Scans subfolder), else the folder's only
+        picture. None when there is no such picture.
+    """
     here = images.get(folder, [])
     art = [p for d, ps in images.items() if d.parent == folder and d.name.lower() in ART_DIRS for p in ps]
+    # Tuples compare left to right, so min() prefers the folder itself over an art subfolder, then the better
+    # rank, then the name (which only makes the choice the same every time).
     named = [
         (where, rank, p.name.lower(), p)
         for where, group in enumerate((here, art))
@@ -127,10 +170,19 @@ def _cover(folder: Path, images: dict[Path, list[Path]]) -> Path | None:
 
 
 def find(root: Path, audio: list[Path], others: list[Path]) -> dict[Path, Extras]:
-    """Extras for each audio file under `root`, from the sidecar files in `others` (also under `root`)."""
+    """Work out what the sidecar files add to each audio file.
+
+    Args:
+        root: The top folder of the upload or download. Nothing above it is looked at.
+        audio: The audio files, all under `root`.
+        others: The sidecar files (pictures, XML, NFO), also under `root`.
+
+    Returns:
+        The Extras of every audio file, keyed by its path.
+    """
     images: dict[Path, list[Path]] = {}
     xml: dict[Path, _Xml] = {}
-    for p in sorted(others):
+    for p in sorted(others):  # sorted: which file wins a tie must not depend on the order they arrived in
         if suffix(p) in IMAGES:
             images.setdefault(p.parent, []).append(p)
         elif suffix(p) in ("xml", "nfo"):
@@ -147,6 +199,7 @@ def find(root: Path, audio: list[Path], others: list[Path]) -> dict[Path, Extras
                 by_number = {"title": info.titles[int(n.group(1))]} if n and int(n.group(1)) in info.titles else {}
                 if by_number:
                     by_number["tracknumber"] = n.group(1)
+                # Most specific first: this file's own entry, then its title by track number, then the album's.
                 for source in (info.files.get(rel, {}), by_number, info.album):
                     for k, v in source.items():
                         tags.setdefault(k, v)
