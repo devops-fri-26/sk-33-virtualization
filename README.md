@@ -24,6 +24,8 @@ docker compose -f docker-compose.yml -f docker-compose.https.yml up -d --build
 ```
 It starts Caddy on ports 80 and 443, which gets a Let's Encrypt certificate for `DOMAIN` (set it in `.env`, e.g. `DOMAIN=music.example.com`) and renews it. The app is then only reachable at `https://DOMAIN`; port 8080 is closed. Before the first start, the domain's DNS record must point at the server and ports 80 and 443 must be open. Needs Docker Compose 2.24 or newer.
 
+The whole way from an empty server to a running site (DNS, email, `.env`, backups, moving servers): [DEPLOY.md](DEPLOY.md).
+
 ### Accounts
 - **Sign-up:** new users confirm their email, then an admin approves them (account menu → **Admin**). Admins get an email when someone is waiting, and the user gets one when approved.
 - **Admins:** the emails in `ADMIN_EMAILS` are admins and skip approval (they still confirm their email). Admins can make other users admins.
