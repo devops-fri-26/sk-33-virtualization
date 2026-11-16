@@ -225,3 +225,5 @@ __marimo__/
 !/backend/app/plugins/README.md
 /frontend/src/plugins/*
 !/frontend/src/plugins/README.md
+
+graphify-out/
