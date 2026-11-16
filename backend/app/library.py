@@ -9,7 +9,7 @@ import re
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 import httpx
 import mutagen
@@ -22,7 +22,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.datastructures import UploadFile
 
-from . import sidecars
+from . import audiotags, sidecars
 from .auth import CurrentUser, storage_used
 from .config import settings
 from .db import SessionDep
@@ -111,18 +111,17 @@ def user_lock(user_id: int) -> asyncio.Lock:
     return _user_locks.setdefault(user_id, asyncio.Lock())
 
 
-def _first(tags, key) -> str | None:
-    """Get the first value of a tag as text.
+def _first(tags: dict[str, list[str]], key: str) -> str | None:
+    """Get the first value of a tag.
 
     Args:
-        tags: The file's tags from mutagen (values are lists), or None when it has none.
+        tags: The file's tags (see audiotags.text_tags()).
         key: The tag's name, e.g. "title".
 
     Returns:
-        The value without surrounding spaces. None when the tag is missing or empty.
+        The value. None when the file doesn't have the tag.
     """
-    vals = tags.get(key) if tags else None
-    return str(vals[0]).strip() or None if vals else None
+    return (tags.get(key) or [None])[0]
 
 
 def _int(value: str | None) -> int | None:
@@ -321,6 +320,65 @@ async def _artist(db: AsyncSession, name: str) -> Artist:
     return artist
 
 
+async def _album(db: AsyncSession, title: str, artist_name: str | None, **new) -> tuple[Album, bool]:
+    """Get the album with this title and album artist, creating it when it doesn't exist yet.
+
+    Callers hold _library_lock, so two imports can't both create it.
+
+    Args:
+        db: Database session.
+        title: The album's title.
+        artist_name: The album artist's name, None for an album without one.
+        **new: Fields for a new album (year, cover).
+
+    Returns:
+        The album and whether it is new. A new one is flushed (it has an id) but not committed.
+    """
+    artist = await _artist(db, artist_name) if artist_name else None
+    album = await db.scalar(
+        select(Album).where(Album.title == title, Album.artist_id == (artist.id if artist else None))
+    )
+    if album:
+        return album, False
+    album = Album(title=title, artist=artist, **new)
+    db.add(album)
+    await db.flush()
+    return album, True
+
+
+def _sha256(path: Path) -> str:
+    """Hash a file's content, reading it in pieces so a big file doesn't have to fit in memory."""
+    digest = hashlib.sha256()
+    with path.open("rb") as f:
+        while chunk := f.read(1024**2):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+async def _duplicate(db: AsyncSession, size: int, content_hash: str) -> Track | None:
+    """Find the track that has exactly this file.
+
+    Only tracks of the same size can be it. Those from before hashes were stored are hashed now, once.
+
+    Args:
+        db: Database session.
+        size: The new file's size in bytes.
+        content_hash: Its SHA-256.
+
+    Returns:
+        The track with the same content, or None. Hashes worked out on the way are not committed yet.
+    """
+    for other in await db.scalars(select(Track).where(Track.size == size).order_by(Track.id)):
+        if other.content_hash is None:
+            try:
+                other.content_hash = await asyncio.to_thread(_sha256, Path(other.path))
+            except OSError:  # its file is missing: nothing to compare with
+                continue
+        if other.content_hash == content_hash:
+            return other
+    return None
+
+
 async def import_file(
     db: AsyncSession, src: Path, original_name: str, user_id: int | None, extras: sidecars.Extras | None = None
 ) -> Track:
@@ -341,7 +399,8 @@ async def import_file(
         The new track.
 
     Raises:
-        ValueError: If the format isn't supported or the file isn't audio that can be read.
+        ValueError: If the format isn't supported, the file isn't audio that can be read, or the same file is
+            already in the library.
         mutagen.MutagenError: If the file is damaged.
         OSError: If the file can't be moved into the library.
     """
@@ -351,20 +410,29 @@ async def import_file(
     audio = mutagen.File(src, easy=True)
     if audio is None:
         raise ValueError("Not a readable audio file")
-    tags = audio.tags
+    tags = audiotags.text_tags(audio, src)
     extras = extras or sidecars.Extras()
+
+    size, content_hash = src.stat().st_size, await asyncio.to_thread(_sha256, src)
+    if same := await _duplicate(db, size, content_hash):
+        await db.commit()  # keeps the hashes that were worked out while looking
+        raise ValueError(f'Already in the library as "{same.title}"')
 
     def tag(key: str) -> str | None:
         """Get a tag from the file itself, else from the files next to it."""
         return _first(tags, key) or extras.tags.get(key)
 
-    # Track artists: the file's own, else the sidecars', else the album artist.
-    names = _names(tags.get("artist") if tags else None) or _names([extras.tags.get("artist") or ""])
-    if not names and tag("albumartist"):
+    # Track artists: the file's own, else the sidecars', else the album artist (unless that is "Various Artists").
+    names = _names(tags.get("artist")) or _names([extras.tags.get("artist") or ""])
+    various = audiotags.VARIOUS.casefold()
+    if not names and tag("albumartist") and tag("albumartist").casefold() != various:
         names = [tag("albumartist")]
     title = tag("title") or Path(original_name).stem
     album_title = tag("album")
-    album_artist_name = tag("albumartist") or (names[0] if names else None)
+    # Album artist: the tag (sidecars.find() fills it in for a folder's compilation), else the first track artist.
+    album_artist_name = tag("albumartist") or (
+        audiotags.VARIOUS if audiotags.is_compilation(tags) else names[0] if names else None
+    )
 
     # Move into /music/Artist/Album/<file>, avoiding name clashes.
     folder = Path(settings.music_dir) / _safe(album_artist_name or "Unknown Artist") / _safe(album_title or "Singles")
@@ -376,17 +444,7 @@ async def import_file(
         async with _library_lock:
             artists = [await _artist(db, name) for name in dict.fromkeys(names)]  # fromkeys: no name twice
             if album_title:
-                album_artist = await _artist(db, album_artist_name) if album_artist_name else None
-                album = await db.scalar(
-                    select(Album).where(
-                        Album.title == album_title, Album.artist_id == (album_artist.id if album_artist else None)
-                    )
-                )
-                if not album:
-                    album = Album(title=album_title, artist=album_artist, year=_int(tag("date")))
-                    db.add(album)
-                    await db.flush()
-                    new_album = True
+                album, new_album = await _album(db, album_title, album_artist_name, year=_int(tag("date")))
                 if not album.cover:  # the folder's cover picture, else the embedded one (else Cover Art Archive)
                     album.cover = _save_cover(_read_bytes(extras.cover)) or _save_cover(_embedded_cover(dest))
 
@@ -400,7 +458,8 @@ async def import_file(
                 format=ext,
                 mime=MIME[ext],
                 path=str(dest),
-                size=dest.stat().st_size,
+                size=size,
+                content_hash=content_hash,
                 uploaded_by=user_id,
                 needs_artists=not artists,
                 artists=artists,
@@ -545,6 +604,48 @@ async def tracks_needing_artists(db: SessionDep, user: CurrentUser, needs_artist
     return [track_out(t) for t in rows]
 
 
+Offset = Annotated[int, Query(ge=0)]
+PageSize = Annotated[int, Query(ge=1, le=200)]
+
+
+@router.get("/albums")
+async def list_albums(
+    db: SessionDep, _: CurrentUser, offset: Offset = 0, limit: PageSize = 60, sort: Literal["title", "recent"] = "title"
+):
+    """List every album in the library, a page at a time.
+
+    Args:
+        db: Database session.
+        offset: How many albums to skip.
+        limit: How many to return at most.
+        sort: "title" for A to Z, "recent" for the newest first.
+
+    Returns:
+        `total`, the number of albums in the library, and `items`, this page (see album_out()).
+    """
+    order = (Album.id.desc(),) if sort == "recent" else (func.lower(Album.title), Album.id)
+    albums = await db.scalars(select(Album).order_by(*order).offset(offset).limit(limit))
+    total = await db.scalar(select(func.count()).select_from(Album))
+    return {"total": total, "items": [album_out(a) for a in albums]}
+
+
+@router.get("/artists")
+async def list_artists(db: SessionDep, _: CurrentUser, offset: Offset = 0, limit: PageSize = 60):
+    """List every artist in the library from A to Z, a page at a time.
+
+    Args:
+        db: Database session.
+        offset: How many artists to skip.
+        limit: How many to return at most.
+
+    Returns:
+        `total`, the number of artists in the library, and `items`, the id and name of this page's artists.
+    """
+    artists = await db.scalars(select(Artist).order_by(func.lower(Artist.name), Artist.id).offset(offset).limit(limit))
+    total = await db.scalar(select(func.count()).select_from(Artist))
+    return {"total": total, "items": [{"id": a.id, "name": a.name} for a in artists]}
+
+
 @router.get("/albums/{album_id}")
 async def get_album(album_id: int, db: SessionDep, _: CurrentUser):
     """Get an album with its tracks.
@@ -594,12 +695,6 @@ async def get_artist(artist_id: int, db: SessionDep, _: CurrentUser):
     }
 
 
-class ArtistNames(BaseModel):
-    """The artists to give a track, by name."""
-
-    names: list[Annotated[str, Field(max_length=200)]] = Field(min_length=1, max_length=50)
-
-
 async def _remove_unused_artists(db: AsyncSession, artist_ids: set[int]):
     """Delete the artists among `artist_ids` that no track or album refers to any more.
 
@@ -616,16 +711,55 @@ async def _remove_unused_artists(db: AsyncSession, artist_ids: set[int]):
             await db.delete(await db.get(Artist, artist_id))
 
 
-@router.put("/tracks/{track_id}/artists")
-async def set_artists(track_id: int, data: ArtistNames, db: SessionDep, user: CurrentUser):
-    """Replace a track's artists.
+async def _move_to_album(db: AsyncSession, track: Track, title: str, artist_name: str | None):
+    """Put a track into the album with this title and album artist, or take it out of its album.
 
-    Artists that don't exist yet are created, and ones that nothing uses any more are deleted. The track no longer
-    counts as needing artists.
+    The album is created when it doesn't exist yet; it then starts with the year and cover of the album the track
+    comes from (which is what renaming an album track by track needs). The audio file stays where it is on disk.
+    Callers hold _library_lock; the album the track leaves is not removed here.
+
+    Args:
+        db: Database session.
+        track: The track to move.
+        title: The album's title. Empty for no album.
+        artist_name: The album artist's name. None for the artist of the track's current album, else the track's
+            first artist.
+    """
+    old = track.album
+    if not title:
+        track.cover = track.cover or (old.cover if old else None)  # it keeps the picture it was shown with
+        track.album = None
+        return
+    if artist_name is None and old:
+        artist_name = old.artist.name if old.artist else None
+    elif artist_name is None:
+        artist_name = track.artists[0].name if track.artists else None
+    album, _ = await _album(db, title, artist_name, year=old.year if old else None, cover=old.cover if old else None)
+    album.cover = album.cover or track.cover
+    track.album, track.cover = album, None  # an album's tracks show the album cover
+
+
+class TrackEdit(BaseModel):
+    """Changes to a track. Fields that are left out stay as they are."""
+
+    title: Annotated[str, Field(max_length=500)] | None = None
+    artists: list[Annotated[str, Field(max_length=200)]] | None = Field(None, max_length=50)
+    album: Annotated[str, Field(max_length=500)] | None = None  # the album's title; "" takes the track out of it
+    # With `album`. Left out: the album artist stays (a track without an album: its first artist). "" for none.
+    album_artist: Annotated[str, Field(max_length=200)] | None = None
+
+
+@router.patch("/tracks/{track_id}")
+async def edit_track(track_id: int, data: TrackEdit, db: SessionDep, user: CurrentUser):
+    """Change a track's title, artists or album.
+
+    Artists and albums that don't exist yet are created, and ones that nothing uses any more are deleted. A track
+    whose artists are set no longer counts as needing them. Only the library changes: the audio file and its
+    tags stay as they were uploaded.
 
     Args:
         track_id: The track.
-        data: The artist names.
+        data: The changes.
         db: Database session.
         user: The logged-in user, who must have uploaded the track or be an admin.
 
@@ -633,20 +767,36 @@ async def set_artists(track_id: int, data: ArtistNames, db: SessionDep, user: Cu
         The updated track (see track_out()).
 
     Raises:
-        HTTPException: 404 when the track doesn't exist, 403 when someone else uploaded it, 422 when every name
-            is blank.
+        HTTPException: 404 when the track doesn't exist, 403 when someone else uploaded it, 422 when the new
+            title or every artist name is blank.
     """
     track = await own_track(db, track_id, user)
-    names = [n.strip() for n in data.names if n.strip()]
-    if not names:
+    title = data.title.strip() if data.title is not None else None
+    names = [n.strip() for n in data.artists if n.strip()] if data.artists is not None else None
+    if title == "":
+        raise HTTPException(422, "The title can't be empty")
+    if names == []:
         raise HTTPException(422, "At least one artist name required")
+    old_album, covers = track.album, {track.cover}
     async with _library_lock:
-        before = {a.id for a in track.artists}
-        track.artists = [await _artist(db, n) for n in dict.fromkeys(names)]
-        track.needs_artists = False
+        maybe_unused = {a.id for a in track.artists} | ({old_album.artist_id} if old_album else set())
+        if title:
+            track.title = title
+        if names:
+            track.artists = [await _artist(db, n) for n in dict.fromkeys(names)]
+            track.needs_artists = False
+        if data.album is not None:
+            album_artist = data.album_artist.strip() if data.album_artist is not None else None
+            await _move_to_album(db, track, data.album.strip(), album_artist)
         await db.flush()
-        await _remove_unused_artists(db, before - {a.id for a in track.artists})  # e.g. a misspelt name
+        left = old_album and track.album is not old_album
+        if left and not await db.scalar(select(Track.id).where(Track.album_id == old_album.id).limit(1)):
+            covers.add(old_album.cover)  # it was the album's last track: the album goes too
+            await db.delete(old_album)
+            await db.flush()
+        await _remove_unused_artists(db, maybe_unused - {None})  # e.g. a misspelt name
         await db.commit()
+    await _remove_unused_covers(db, covers)
     return track_out(track)
 
 

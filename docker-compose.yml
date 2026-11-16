@@ -36,3 +36,11 @@ services:
     ports: ["127.0.0.1:8080:80"]
     depends_on: [backend]
 
+  # Development only: catches every email the app sends and shows it on http://localhost:8025.
+  # It has a profile, so a plain `docker compose up` (production) doesn't start it.
+  mailpit:
+    image: axllent/mailpit:v1.33.0
+    profiles: [dev]
+    restart: unless-stopped
+    ports: ["127.0.0.1:8025:8025", "127.0.0.1:1025:1025"]
+

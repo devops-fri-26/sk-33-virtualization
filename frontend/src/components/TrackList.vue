@@ -8,8 +8,8 @@ import { useAuth } from '../stores/auth'
 import { usePlayer } from '../stores/player'
 import { usePlaylists } from '../stores/playlists'
 import { useUi } from '../stores/ui'
-import ArtistEditor from './ArtistEditor.vue'
 import Cover from './Cover.vue'
+import TrackEditor from './TrackEditor.vue'
 
 // Spotify-style track table.
 // `album` mode hides covers and the album column and shows track numbers;
@@ -191,7 +191,7 @@ function saved(updated) {
             <ListPlus class="h-4 w-4" /> Add to queue
           </button>
           <button :class="item" @click="menu.pick = true"><CirclePlus class="h-4 w-4" /> Add to playlist</button>
-          <button v-if="auth.canEdit(menu.track)" :class="item" @click="editTrack"><Pencil class="h-4 w-4" /> Edit artists</button>
+          <button v-if="auth.canEdit(menu.track)" :class="item" @click="editTrack"><Pencil class="h-4 w-4" /> Edit details</button>
           <a :class="item" :href="`/api/tracks/${menu.track.id}/download`" @click="closeMenu"><Download class="h-4 w-4" /> Download</a>
           <template v-if="playlist">
             <div class="my-1 border-t border-white/10" />
@@ -212,5 +212,5 @@ function saved(updated) {
     </template>
   </Teleport>
 
-  <ArtistEditor v-if="editing" :track="editing" @close="editing = null" @saved="saved" />
+  <TrackEditor v-if="editing" :track="editing" @close="editing = null" @saved="saved" />
 </template>

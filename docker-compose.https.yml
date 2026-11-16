@@ -1,7 +1,6 @@
 # Production add-on: Caddy in front of the app, with a Let's Encrypt certificate for DOMAIN (set it in .env).
-# Use it together with one of the two base files:
+# Use it together with the base file:
 #   docker compose -f docker-compose.yml -f docker-compose.https.yml up -d --build
-#   docker compose -f docker-compose.no-torrents.yml -f docker-compose.https.yml up -d --build
 # Before the first start: DOMAIN's DNS record points at this server, and ports 80 and 443 are open.
 services:
   caddy:

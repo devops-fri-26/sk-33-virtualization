@@ -1,9 +1,11 @@
-"""The logged-in user's own settings: name, email, password, sessions, storage requests."""
+"""The logged-in user's own settings: name, email, password, sessions, storage requests, deleting the account."""
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Response
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from . import plugins
 from .auth import (
     CurrentUser,
     Email,
@@ -22,7 +24,7 @@ from .auth import (
 from .config import settings
 from .db import SessionDep
 from .mail import admin_emails, send_mail
-from .models import GB, User
+from .models import GB, Track, User
 
 router = APIRouter(prefix="/api/account", tags=["account"])
 
@@ -157,6 +159,50 @@ async def logout_everywhere(response: Response, db: SessionDep, user: CurrentUse
     await db.commit()
     end_session(response)
     return {"detail": "Logged out on all devices"}
+
+
+class AccountDelete(BaseModel):
+    """The current password, to prove who is asking for the account to be deleted."""
+
+    password: PasswordIn
+
+
+async def remove_user(db: AsyncSession, user: User):
+    """Delete an account and its playlists. Its uploads stay in the library, without an uploader. Commits.
+
+    Args:
+        db: Database session.
+        user: The account to delete.
+    """
+    for delete_user in plugins.each("delete_user"):  # e.g. stop what the user has running
+        await delete_user(db, user.id)
+    # tracks.uploaded_by has no ON DELETE rule, so the database would refuse the delete while tracks point here.
+    await db.execute(update(Track).where(Track.uploaded_by == user.id).values(uploaded_by=None))
+    await db.delete(user)  # the database deletes the playlists along with it
+    await db.commit()
+
+
+@router.post("/delete", status_code=204)
+async def delete_account(data: AccountDelete, response: Response, db: SessionDep, user: CurrentUser):
+    """Delete the user's own account and playlists, and log this browser out.
+
+    The music they uploaded stays in the shared library (then only admins can edit it).
+
+    Args:
+        data: The current password.
+        response: Tells this browser to delete its session cookie.
+        db: Database session.
+        user: The logged-in user.
+
+    Raises:
+        HTTPException: 400 when the password is wrong or the user is the only admin, 429 after too many attempts.
+    """
+    await check_password(user, data.password)
+    other_admin = select(User.id).where(User.is_admin, ~User.is_disabled, User.id != user.id).limit(1)
+    if user.is_admin and not await db.scalar(other_admin):
+        raise HTTPException(400, "You are the only admin. Make someone else an admin first.")
+    await remove_user(db, user)
+    end_session(response)
 
 
 @router.post("/storage-request")

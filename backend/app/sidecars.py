@@ -1,13 +1,17 @@
 """Album info found next to audio files (an uploaded folder, or files a plugin imports).
 
 That is front-cover pictures, archive.org's <item>_files.xml / <item>_meta.xml and Kodi/Jellyfin album.nfo. It only
-fills in what the audio file's own tags leave empty; these files aren't kept in the library.
+fills in what the audio file's own tags leave empty; these files aren't kept in the library. The audio files of one
+album also tell each other their album artist (see _album_artists()).
 """
 
 import re
 import xml.etree.ElementTree as ET
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path, PurePath
+
+from . import audiotags
 
 IMAGES = {"jpg", "jpeg", "png", "webp"}
 SIDECARS = IMAGES | {"xml", "nfo"}
@@ -210,4 +214,49 @@ def find(root: Path, audio: list[Path], others: list[Path]) -> dict[Path, Extras
         if not cover and DISC.match(a.parent.name) and a.parent != root:  # Album/CD1/01.flac + Album/cover.jpg
             cover = _cover(a.parent.parent, images)
         out[a] = Extras(tags, cover)
+    _album_artists(out)
     return out
+
+
+def _album_artists(extras: dict[Path, Extras]):
+    """Give the tracks of one album the same album artist where their tags don't name one.
+
+    An import takes a track's first artist as the album artist when no tag says otherwise, which would split a
+    compilation into one album per artist. So the audio files of a folder (the folder above for CD1, CD2…) that
+    share an album title are looked at together: they get the album artist that some of them are tagged with, else
+    "Various Artists" when a compilation flag is set or no artist has more than half of the tracks, else that
+    artist (which keeps "A" and "A feat. B" in one album).
+
+    Args:
+        extras: The Extras of every audio file, keyed by its path. Their `tags` are changed in place.
+    """
+    groups: dict[tuple[Path, str], list[tuple[Extras, str | None, str | None, bool]]] = {}
+    for path, extra in extras.items():
+        own = audiotags.read(path)
+        # The file's own tag, else what the files next to it say: the same order as in an import.
+        album, artist, album_artist = (
+            (own.get(key) or [None])[0] or extra.tags.get(key) for key in ("album", "artist", "albumartist")
+        )
+        if album:
+            artist = (artist or "").split(";")[0].strip() or None  # one value may hold several names
+            folder = path.parent.parent if DISC.match(path.parent.name) else path.parent
+            groups.setdefault((folder, album.casefold()), []).append(
+                (extra, album_artist, artist, audiotags.is_compilation(own))
+            )
+
+    for group in groups.values():
+        tagged = Counter(album_artist for _, album_artist, _, _ in group if album_artist)
+        artists = Counter(artist.casefold() for _, _, artist, _ in group if artist)
+        if tagged:
+            choice = tagged.most_common(1)[0][0]
+        elif any(compilation for *_, compilation in group):
+            choice = audiotags.VARIOUS
+        elif len(artists) < 2:
+            continue  # one artist, or none known: the import's own rule is right
+        else:
+            top, count = artists.most_common(1)[0]
+            majority = next(artist for _, _, artist, _ in group if artist and artist.casefold() == top)
+            choice = majority if count * 2 > len(group) else audiotags.VARIOUS
+        for extra, album_artist, _, _ in group:
+            if not album_artist:
+                extra.tags["albumartist"] = choice

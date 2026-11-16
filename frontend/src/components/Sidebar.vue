@@ -1,5 +1,5 @@
 <script setup>
-import { AudioLines, House, Library, Plus, Search, Upload, Volume2 } from 'lucide-vue-next'
+import { AudioLines, Disc3, House, Library, Plus, Search, Upload, Volume2 } from 'lucide-vue-next'
 import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { nav as pluginNav } from '../plugins'
@@ -10,6 +10,7 @@ import Cover from './Cover.vue'
 const nav = computed(() => [
   { to: '/', label: 'Home', icon: House },
   { to: '/search', label: 'Search', icon: Search },
+  { to: '/browse', label: 'Browse', icon: Disc3 },
   { to: '/upload', label: 'Upload', icon: Upload },
   ...pluginNav(),
 ])

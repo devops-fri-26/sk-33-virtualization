@@ -7,7 +7,7 @@ The app works without any. A plugin is a Python package whose `__init__.py` may 
 - `STARTUP_SQL`: a list of SQL statements, run at startup after the tables exist (after the app's own list).
 - `startup()`: async, called once before the app takes requests (e.g. to start a background task).
 - `shutdown()`: async, called when the app stops.
-- `delete_user(db, user_id)`: async, called before an admin deletes an account.
+- `delete_user(db, user_id)`: async, called before an account is deleted (by an admin or by its owner).
 
 Tables a plugin declares (subclasses of `db.Base`) are created with the app's own.
 """

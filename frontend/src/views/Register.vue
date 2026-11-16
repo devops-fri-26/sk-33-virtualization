@@ -6,6 +6,7 @@ import AuthLayout, { button, input } from '../components/AuthLayout.vue'
 
 const email = ref('')
 const password = ref('')
+const repeat = ref('')
 const sent = ref(false)
 const error = ref('')
 const busy = ref(false)
@@ -18,6 +19,7 @@ async function resend() {
 
 async function submit() {
   error.value = ''
+  if (password.value !== repeat.value) return (error.value = "The passwords don't match")
   busy.value = true
   try {
     await api('/auth/register', { method: 'POST', body: { email: email.value, password: password.value } })
@@ -48,6 +50,7 @@ async function submit() {
         <input v-model="password" type="password" required minlength="8" autocomplete="new-password" :class="input" class="mt-2 font-normal" />
         <span class="mt-1 block text-xs font-normal text-muted">At least 8 characters.</span>
       </label>
+      <label class="block text-sm font-bold">Repeat password<input v-model="repeat" type="password" required autocomplete="new-password" :class="input" class="mt-2 font-normal" /></label>
       <p v-if="error" class="rounded-md bg-red-500/15 px-3 py-2 text-sm text-red-300">{{ error }}</p>
       <button :class="button" :disabled="busy">Sign up</button>
     </form>
