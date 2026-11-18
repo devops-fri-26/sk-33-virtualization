@@ -9,6 +9,7 @@ const router = createRouter({
   routes: [
     { path: '/', component: () => import('./views/Home.vue') },
     { path: '/search', component: () => import('./views/Search.vue') },
+    { path: '/browse', component: () => import('./views/Browse.vue') },
     { path: '/library', component: () => import('./views/Library.vue') },
     { path: '/upload', component: () => import('./views/Upload.vue') },
     { path: '/album/:id', component: () => import('./views/Album.vue') },

@@ -1,5 +1,5 @@
 <script setup>
-import { House, Library, LogOut, Search, Settings, Shield, Upload } from 'lucide-vue-next'
+import { Disc3, House, Library, LogOut, Search, Settings, Shield, Upload } from 'lucide-vue-next'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import PlayerBar from './components/PlayerBar.vue'
@@ -20,6 +20,7 @@ const userMenu = ref(false)
 const mobileNav = computed(() => [
   { to: '/', label: 'Home', icon: House },
   { to: '/search', label: 'Search', icon: Search },
+  { to: '/browse', label: 'Browse', icon: Disc3 },
   { to: '/library', label: 'Library', icon: Library },
   { to: '/upload', label: 'Upload', icon: Upload },
   ...pluginNav(),

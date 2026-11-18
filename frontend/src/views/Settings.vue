@@ -1,20 +1,24 @@
 <script setup>
-import { HardDrive, KeyRound, Mail, MonitorSmartphone, UserRound } from 'lucide-vue-next'
-import { reactive, ref } from 'vue'
+import { HardDrive, KeyRound, Mail, MonitorSmartphone, Trash2, UserRound } from 'lucide-vue-next'
+import { computed, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../api'
 import StoragePanel from '../components/StoragePanel.vue'
 import { useAuth } from '../stores/auth'
 import { usePlayer } from '../stores/player'
+import { usePlaylists } from '../stores/playlists'
 
 const auth = useAuth()
 const player = usePlayer()
 const router = useRouter()
+const playlists = usePlaylists()
+playlists.load().catch(() => {})
 
 const name = ref(auth.user.name ?? '')
 const emailForm = reactive({ email: '', password: '' })
 const pw = reactive({ current: '', new: '', repeat: '' })
-const result = reactive({ name: null, email: null, password: null }) // per section: { ok, text }
+const del = reactive({ password: '', sure: false })
+const result = reactive({ name: null, email: null, password: null, delete: null }) // per section: { ok, text }
 const busy = ref('')
 
 const card = 'rounded-lg bg-white/5 p-5'
@@ -64,6 +68,19 @@ async function logoutEverywhere() {
   auth.user = null
   router.push('/login')
 }
+
+// " and my 3 playlists", or nothing when there are none.
+const myPlaylists = computed(() => {
+  const n = playlists.list.length
+  return n ? ` and my ${n === 1 ? 'playlist' : `${n} playlists`}` : ''
+})
+const deleteAccount = () =>
+  run('delete', async () => {
+    await api('/account/delete', { method: 'POST', body: { password: del.password } })
+    player.reset()
+    auth.user = null
+    router.push('/login')
+  })
 </script>
 
 <template>
@@ -127,6 +144,29 @@ async function logoutEverywhere() {
         <button class="rounded-full border border-white/30 px-5 py-2 font-bold transition hover:border-white" @click="logoutEverywhere">
           Log out on all devices
         </button>
+      </section>
+
+      <section :class="card" class="ring-1 ring-red-500/30">
+        <h2 :class="heading"><Trash2 class="h-5 w-5 text-red-400" /> Delete account</h2>
+        <p class="mb-4 text-sm text-muted">
+          This deletes your account for good. The music you uploaded stays in the shared library; delete the songs you don't want to leave
+          behind first.
+        </p>
+        <form class="grid gap-3" @submit.prevent="deleteAccount">
+          <label :class="label" class="max-w-xs">
+            Current password<input v-model="del.password" type="password" required autocomplete="current-password" :class="field" />
+          </label>
+          <label class="flex items-start gap-3 text-sm">
+            <input v-model="del.sure" type="checkbox" required class="mt-0.5 h-4 w-4 shrink-0 accent-red-500" />
+            <span>Delete my account{{ myPlaylists }}. This can't be undone.</span>
+          </label>
+          <div>
+            <button class="rounded-full bg-red-500 px-5 py-2 font-bold text-white transition hover:scale-105 disabled:opacity-50" :disabled="!del.sure || busy === 'delete'">
+              Delete my account
+            </button>
+          </div>
+        </form>
+        <p v-if="result.delete && !result.delete.ok" class="mt-3 text-sm text-red-400">{{ result.delete.text }}</p>
       </section>
     </div>
   </div>

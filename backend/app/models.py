@@ -73,6 +73,9 @@ class Track(Base):
     mime: Mapped[str]  # Content-Type the file is served with
     path: Mapped[str] = mapped_column(unique=True)  # where the file is, inside music_dir
     size: Mapped[int]  # bytes; counts against the uploader's quota
+    # SHA-256 of the file, which is how an import notices a file that is already here. None for tracks from before
+    # this existed; it is filled in the first time a file of the same size is imported.
+    content_hash: Mapped[str | None] = mapped_column(String(64))
     uploaded_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))  # None once that account is deleted
     needs_artists: Mapped[bool] = mapped_column(default=False)  # no artist in its tags: the uploader is asked
     album: Mapped[Album | None] = relationship(lazy="selectin")
@@ -112,6 +115,7 @@ STARTUP_SQL = [
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS storage_requested BOOLEAN NOT NULL DEFAULT false",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS session_version INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE tracks ADD COLUMN IF NOT EXISTS cover VARCHAR",
+    "ALTER TABLE tracks ADD COLUMN IF NOT EXISTS content_hash VARCHAR(64)",
     "CREATE EXTENSION IF NOT EXISTS pg_trgm",
     "CREATE INDEX IF NOT EXISTS tracks_title_trgm ON tracks USING gin (title gin_trgm_ops)",
     "CREATE INDEX IF NOT EXISTS artists_name_trgm ON artists USING gin (name gin_trgm_ops)",

@@ -5,16 +5,14 @@ your own machine. Sections are ordered by importance; inside a section, top item
 
 ## 1. Blockers: do these before anyone else gets the address
 
-- [ ] **HTTPS.** The app speaks plain HTTP on port 8080, so passwords and the login cookie travel unencrypted.
-      Put a reverse proxy with certificates in front (Caddy, Traefik, Cloudflare Tunnel), then:
-  - [ ] set `APP_URL` to the `https://` address (email links use it, and it turns on the cookie's `Secure` flag);
-  - [ ] uncomment `set_real_ip_from` / `real_ip_header` in `frontend/nginx.conf`, or every visitor shares one
-        login rate limit (they all look like the proxy);
-  - [ ] change the port mapping to `127.0.0.1:8080:80` if the proxy runs on the same machine, so the plain-HTTP
-        port isn't reachable from outside;
-  - [ ] turn on HSTS in the proxy.
-- [ ] **Real email.** Replace Mailpit: set `SMTP_HOST/PORT/USER/PASS/FROM` and `SMTP_TLS=true`, remove the
-      `mailpit` service from the compose file. Set up SPF/DKIM for the sender domain, or sign-up mails land in spam.
+- [ ] **HTTPS.** `docker-compose.https.yml` puts Caddy with a Let's Encrypt certificate in front, sets `APP_URL`
+      to `https://DOMAIN`, closes the plain-HTTP port and sends HSTS; nginx takes the visitor's address from
+      Caddy. Left to do on the server (see "Deploy with HTTPS" in the README):
+  - [ ] point the domain's DNS record at the server and open ports 80 and 443;
+  - [ ] set `DOMAIN` in `.env` and start with the https file;
+  - [ ] check the certificate, the `Secure` cookie and that the login rate limit counts per visitor.
+- [ ] **Real email.** Replace Mailpit: set `SMTP_HOST/PORT/USER/PASS/FROM` and `SMTP_TLS=true` (the `mailpit`
+      service only starts with `--profile dev`). Set up SPF/DKIM for the sender domain, or sign-up mails land in spam.
 - [ ] **Fresh secrets.** New `SECRET_KEY` and `POSTGRES_PASSWORD` for production (`openssl rand -hex 32`). Don't reuse the values from the development `.env`.
 - [ ] **Register the admin accounts first.** Sign up and verify every address in `ADMIN_EMAILS` yourself before
       opening the site. An address listed there that has no account yet can be registered by anyone; they can't
@@ -31,8 +29,8 @@ your own machine. Sections are ordered by importance; inside a section, top item
       permissions (edit/delete only your own tracks, admin-only API). Run them and
       `ruff check` / `npm run build` on every push.
 - [ ] **Decide the legal side** of offering a shared music library to other people, and who is
-      allowed to sign up. For a public site in the EU you also need a privacy notice and a way to delete an account
-      (see section 3).
+      allowed to sign up. For a public site in the EU you also need a privacy notice (deleting your own account is
+      in Settings).
 
 ## 2. Should do: hardening and operations
 
@@ -65,13 +63,10 @@ your own machine. Sections are ordered by importance; inside a section, top item
 
 ## 3. Missing features users will expect
 
-- [ ] Delete my own account (and its playlists) from Settings.
 - [ ] Upload: progress bar, drag and drop, resume after a failed part.
-- [ ] Edit a track's title and album from the UI (only artists can be edited).
-- [ ] Browse the whole library (all albums / all artists). Today there's search and "recently added".
-- [ ] Duplicate detection: the same file uploaded twice becomes two tracks.
-- [ ] WAV files: their tags aren't read, so they're imported with the file name as title and no artist.
-- [ ] Compilation albums without an "album artist" tag are split into one album per track artist.
+- [ ] Edit a whole album at once (title, album artist, year, cover). Tracks are edited one at a time, so merging
+      an album that was split on import means editing each of its tracks.
+- [ ] Deleting an account can't delete its uploads along with it; they stay in the library without an uploader.
 - [ ] Playlists: drag-and-drop ordering, shared playlists, a cover made from the album covers.
 - [ ] Phone: a full-screen "now playing" view.
 - [ ] Artist pictures.
@@ -81,6 +76,11 @@ your own machine. Sections are ordered by importance; inside a section, top item
 - The library is shared: every approved user can play and download everything.
 - APE / WavPack / AIFF / DSD are rejected because browsers can't play them; converting to FLAC on import would fix it.
 - CUE + single-file album rips are imported as one long track.
+- Duplicates are only noticed when the files are identical byte for byte; the same song from another rip or with
+  other tags is imported again.
+- Compilations are recognised per upload request (a folder, in parts of 500 MB): a part whose tracks all have the
+  same artist becomes an album of its own. Albums that were split before this existed stay split.
+- "Edit details" changes the library only; a downloaded file still has the tags it was uploaded with.
 - Album titles and artist names of new albums without a cover are sent to MusicBrainz / Cover Art Archive to
   look up the cover.
 - Track paths are stored as absolute paths (`/music/…`), so `MUSIC_DIR` can't be changed without updating the database.

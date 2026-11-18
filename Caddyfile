@@ -1,0 +1,11 @@
+# Used by docker-compose.https.yml. Caddy gets and renews the certificate for DOMAIN by itself and
+# redirects http to https.
+{$DOMAIN} {
+	encode zstd gzip
+
+	# Browsers that have visited once refuse plain http for this host for a year.
+	header Strict-Transport-Security "max-age=31536000"
+	header -Server
+
+	reverse_proxy frontend:80
+}
