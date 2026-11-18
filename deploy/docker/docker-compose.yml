@@ -16,7 +16,7 @@ services:
       retries: 10
 
   backend:
-    build: ./backend
+    build: ../../backend
     restart: unless-stopped
     env_file: .env
     environment:
@@ -31,7 +31,7 @@ services:
       interval: 10s
 
   frontend:
-    build: ./frontend
+    build: ../../frontend
     restart: unless-stopped
     ports: ["127.0.0.1:8080:80"]
     depends_on: [backend]
