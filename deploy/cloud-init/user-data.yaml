@@ -45,7 +45,10 @@ write_files:
       # Public host name for HTTPS (Let's Encrypt). Its DNS A record must point at this VM and ports 80/443 must
       # be reachable from the internet. Leave empty for a local VM: Caddy then uses the VM's IP address and a
       # certificate from its own local CA (browser warning).
-      DOMAIN=
+      DOMAIN=devops-sk-33.lrk.si
+      # Local VM reached through port forwarding only (run-qemu.sh): the address the browser opens, host[:port],
+      # e.g. localhost:8443. Empty: DOMAIN, or else the VM's own IP. Ignored when DOMAIN is set.
+      SITE=
       # Git repository and branch to deploy.
       REPO_URL=https://github.com/grobolsek/varsis-app.git
       REPO_REF=main
@@ -251,13 +254,16 @@ write_files:
       cd /opt/varsis/backend
       UV_PYTHON_DOWNLOADS=never UV_COMPILE_BYTECODE=1 uv sync --frozen --no-dev --python python3.13
 
-      if [ -z "$DOMAIN" ]; then
-        SITE=$(hostname -I | awk '{print $1}')
-        TLS="tls internal"
-      else
+      # SITE: the address in the browser and in mail links. SITE_HOST: what Caddy serves and makes a certificate
+      # for. They differ only with port forwarding (localhost:8443 -> the VM's 443): Caddy matches the host name.
+      if [ -n "$DOMAIN" ]; then
         SITE=$DOMAIN
         TLS=""
+      else
+        SITE=${SITE:-$(hostname -I | awk '{print $1}')}
+        TLS="tls internal"
       fi
+      SITE_HOST=${SITE%:*}
 
       install -d -o varsis -g varsis -m 0750 /var/lib/varsis /var/lib/varsis/music /var/lib/varsis/covers
       umask 077
@@ -308,7 +314,7 @@ write_files:
         : > /etc/caddy/mailpit.caddy
         FRAMED="path *"
       fi
-      sed -e "s|__SITE__|$SITE|" -e "s|__TLS__|$TLS|" -e "s|__FRAMED__|$FRAMED|" \
+      sed -e "s|__SITE__|$SITE_HOST|" -e "s|__TLS__|$TLS|" -e "s|__FRAMED__|$FRAMED|" \
         /etc/varsis/Caddyfile.tmpl > /etc/caddy/Caddyfile
       # As the caddy user: validate opens the log file, and as root it would create it owned by root.
       runuser -u caddy -- caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile

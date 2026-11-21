@@ -23,6 +23,7 @@ Edit the `/etc/varsis/deploy.env` block at the top of `write_files` in `user-dat
 | Variable | Meaning |
 |---|---|
 | `DOMAIN` | Public host name. Its DNS points at the VM and ports 80/443 are reachable: Caddy gets a Let's Encrypt certificate. **Empty** (local VM): the VM's IP with a certificate from Caddy's local CA |
+| `SITE` | Only for a VM reached through port forwarding (`run-qemu.sh`): the address the browser opens, e.g. `localhost:8443`. Empty: `DOMAIN`, or the VM's IP |
 | `REPO_URL`, `REPO_REF` | What to deploy |
 | `ADMIN_EMAILS` | Comma-separated admin accounts |
 | `SMTP_*` | Mail provider for sign-up and password mails. Empty: no mails are sent |
@@ -82,6 +83,26 @@ incus exec varsis -- cloud-init status --long
 
 Open `https://<IPv4>` and accept the certificate warning (Caddy's own CA; with `DOMAIN` set it's a real one).
 Start over with a fresh first boot: `incus delete -f varsis`, then launch again.
+
+## Run locally with QEMU
+
+No Incus? [`run-qemu.sh`](run-qemu.sh) needs only QEMU, curl and python3 (no root, no network bridge). It boots
+the same Ubuntu 24.04 cloud image with this `user-data.yaml`, set up for testing: Mailpit on, no domain, and
+`SITE=localhost:8443` because the VM is reached through forwarded ports.
+
+```bash
+ADMIN_EMAIL=you@example.com deploy/cloud-init/run-qemu.sh          # first run: ~5-10 min, log in the terminal
+```
+
+| | |
+|---|---|
+| App | `https://localhost:8443` (certificate warning: Caddy's own CA) |
+| Mailpit | `https://localhost:8443/mailpit/`, user `mailpit`, password: `ssh -p 2222 ubuntu@localhost sudo grep MAILPIT_PASSWORD /etc/varsis/secrets.env` |
+| Shell | `ssh -p 2222 ubuntu@localhost` (your `~/.ssh/*.pub` keys) |
+| Stop | `Ctrl-A`, then `X` |
+
+Running it again boots the same VM; `--reset` starts over with a fresh first boot. `REPO_REF=<branch>` deploys
+another branch (with `--reset`). Files are kept in `~/.cache/varsis-qemu`.
 
 ## Check it
 
