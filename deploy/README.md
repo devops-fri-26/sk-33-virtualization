@@ -38,7 +38,7 @@ VM.
 flowchart LR
     browser(["Browser"])
     subgraph host["Host devops-sk-33 · 88.200.24.30"]
-        proxy["Incus proxy (NAT)<br/>:80 · :443"]
+        proxy["Incus proxy (NAT)<br/>:80 · :443 (TCP + UDP)"]
         subgraph vm["Ubuntu 24.04 VM (Incus) · 10.182.95.10"]
             caddy["Caddy :443<br/>HTTPS · Let's Encrypt"]
             static["/var/www/varsis<br/>built Vue app"]
@@ -120,6 +120,7 @@ incus launch images:ubuntu/24.04/cloud varsis --vm \
   -c boot.autostart=true
 incus config device add varsis http  proxy nat=true listen=tcp:88.200.24.30:80  connect=tcp:10.182.95.10:80
 incus config device add varsis https proxy nat=true listen=tcp:88.200.24.30:443 connect=tcp:10.182.95.10:443
+incus config device add varsis http3 proxy nat=true listen=udp:88.200.24.30:443 connect=udp:10.182.95.10:443
 incus exec varsis -- tail -f /var/log/cloud-init-output.log    # … [varsis-setup] done: https://devops-sk-33.lrk.si
 ```
 

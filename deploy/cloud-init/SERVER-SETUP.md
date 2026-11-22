@@ -9,7 +9,7 @@ flowchart LR
     internet(["Internet<br/>visitors · Let's Encrypt"])
     subgraph host["Host devops-sk-33"]
         nic["enp5s0<br/>88.200.24.30"]
-        proxy["Incus proxy devices<br/>nat=true (DNAT)<br/>:80 → :80 · :443 → :443"]
+        proxy["Incus proxy devices<br/>nat=true (DNAT)<br/>:80 → :80 · :443 → :443 (TCP + UDP)"]
         bridge["incusbr0 · 10.182.95.1/24<br/>DHCP + DNS (dnsmasq)<br/>NAT to the internet"]
         subgraph vm["VM varsis · 10.182.95.10"]
             caddy["Caddy :80 / :443"]
@@ -161,6 +161,7 @@ incus list varsis
 ```bash
 incus config device add varsis http  proxy nat=true listen=tcp:88.200.24.30:80  connect=tcp:10.182.95.10:80
 incus config device add varsis https proxy nat=true listen=tcp:88.200.24.30:443 connect=tcp:10.182.95.10:443
+incus config device add varsis http3 proxy nat=true listen=udp:88.200.24.30:443 connect=udp:10.182.95.10:443
 ```
 
 `nat=true` makes Incus add DNAT firewall rules instead of running a proxy process, so the VM sees each visitor's
@@ -169,6 +170,11 @@ the host's real IP (not `0.0.0.0`), and the VM must have a fixed IP (step 6).
 
 Ports must match on both sides (80 → 80, 443 → 443): Caddy listens on 80 (ACME HTTP challenge, redirect to https)
 and 443.
+
+The third forward is **UDP** 443 for **HTTP/3** (QUIC), which Caddy offers next to HTTP/1.1 and HTTP/2. A browser
+first connects over TCP, sees Caddy's `Alt-Svc: h3=":443"` header and uses HTTP/3 from then on. Without this
+forward it still works, just never over HTTP/3. Check: browser dev tools → Network → the Protocol column shows `h3`
+after a reload.
 
 ## 8. Follow the setup
 

@@ -316,7 +316,8 @@ and Ubuntu 24.04 ships Node 18.
 - `ufw allow 22/tcp`: SSH. Allowed **before** enabling, otherwise you'd lock yourself out. By port number, not the
   `OpenSSH` profile name: minimal images (e.g. Incus's) have no SSH server and so no such profile.
 - `ufw allow 80/tcp`: plain HTTP. Needed for Let's Encrypt's HTTP challenge and the http→https redirect.
-- `ufw allow 443`: TCP for HTTPS, and UDP for HTTP/3 (QUIC), which Caddy also offers.
+- `ufw allow 443`: TCP for HTTPS, and UDP for HTTP/3 (QUIC), which Caddy also offers. On our server the host
+  forwards both to the VM (SERVER-SETUP.md, step 7).
 - `ufw --force enable`: turn it on without the "are you sure?" prompt. The default policy denies everything else
   incoming, so Postgres (5432) and the backend (8000) aren't reachable from outside even if they listened there.
 
