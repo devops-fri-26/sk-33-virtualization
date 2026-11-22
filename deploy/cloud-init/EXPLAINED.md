@@ -1,7 +1,7 @@
 # user-data.yaml, step by step
 
-A walk through [`user-data.yaml`](user-data.yaml) in the order things happen on the VM. Line numbers refer to
-that file.
+A walk through [`user-data.yaml`](user-data.yaml) and the setup scripts it runs, in the order things happen on the
+VM.
 
 ## 0. The big picture
 
@@ -25,12 +25,18 @@ Two consequences shape the file:
   owning nothing by `varsis` in `write_files` and setting ownership later in the script.
 - **`runcmd` runs after `packages`.** Postgres, git and Python are already installed when the script starts.
 
-The design: **cloud-config declares what's static** (packages, a user, config files) and **one bash script does
-everything that needs logic** (if/else, generated secrets, building). runcmd only calls that script.
+The design: **cloud-config declares what's static** (settings, packages, a user) and **bash scripts do everything
+that needs logic** (if/else, generated secrets, building). The scripts are normal files in the repository
+([`scripts/`](scripts)), one per step, like the Vagrant version. `runcmd` clones the repository and calls them in
+order. The config files they install (Caddyfile template, systemd units) are in [`files/`](files).
+
+cloud-init only receives `user-data.yaml`, nothing else from the repository. That's why the VM gets the scripts by
+cloning the repository: it must be reachable without a login (public), and a changed script only reaches new VMs
+after it's committed and pushed to `REPO_REF`.
 
 ---
 
-## 1. Header and comments (lines 1–12)
+## 1. Header and comments
 
 ```yaml
 #cloud-config
@@ -39,7 +45,7 @@ everything that needs logic** (if/else, generated secrets, building). runcmd onl
 This first line is required. Without it cloud-init doesn't treat the file as cloud-config. The comments below it
 summarize the stage order from section 0.
 
-## 2. Package settings (lines 14–15)
+## 2. Package settings
 
 ```yaml
 package_update: true
@@ -50,7 +56,7 @@ package_upgrade: false
 - `package_upgrade: false` skips `apt-get upgrade` of the whole system. That saves minutes on first boot. Ubuntu
   cloud images have **unattended-upgrades** enabled, which installs security updates in the background anyway.
 
-## 3. Extra apt source: deadsnakes (lines 17–20)
+## 3. Extra apt source: deadsnakes
 
 ```yaml
 apt:
@@ -65,7 +71,7 @@ and fetches its signing key from the Ubuntu keyserver, so it's ready before `pac
 
 Why not let `uv` download Python? See the end of this document.
 
-## 4. Packages (lines 22–30)
+## 4. Packages
 
 | Package | Why |
 |---|---|
@@ -77,9 +83,10 @@ Why not let `uv` download Python? See the end of this document.
 | `python3.13`, `python3.13-venv` | Runtime for the backend (from deadsnakes) |
 | `pipx` | Installs Python CLI tools in isolated venvs. Used to install `uv` |
 
-Caddy and Node.js aren't here because their apt repositories are added later by the script (section 9.1).
+Caddy and Node.js aren't here because their apt repositories are added later by `install-dependencies.sh`
+(section 9.1).
 
-## 5. Users (lines 32–38)
+## 5. Users
 
 ```yaml
 users:
@@ -102,7 +109,7 @@ users:
 **Why a separate user:** if someone found a bug in the backend, they'd get the rights of `varsis`. That's only
 its own data folder, not root.
 
-## 6. write_files, part 1: settings (lines 42–61)
+## 6. write_files: settings
 
 ```yaml
 - path: /etc/varsis/deploy.env
@@ -115,34 +122,34 @@ The **only place you edit before launching**. It's a list of `NAME=value` lines 
 | Variable | Effect |
 |---|---|
 | `DOMAIN` | Empty: local VM, HTTPS on the VM's IP with a self-signed certificate. Set: a real Let's Encrypt certificate for that name |
-| `REPO_URL`, `REPO_REF` | Which git repository and branch to deploy |
+| `SITE` | Only for a local VM reached through port forwarding: the address the browser opens (e.g. `localhost:8443`). Ignored when `DOMAIN` is set |
+| `REPO_URL`, `REPO_REF` | Which git repository and branch to deploy. The setup scripts come from it too |
 | `ADMIN_EMAILS` | Accounts the backend makes admin (and approves) at startup |
 | `DEFAULT_QUOTA_GB` | Upload space per new user |
 | `SMTP_*` | Mail server for verification and password-reset mails |
+| `MAILPIT` | `true`: install Mailpit and send all mail there instead of `SMTP_*` (testing) |
 
-## 7. write_files, part 2: Caddy template (lines 64–106)
+## 7. Caddy template ([`files/Caddyfile.tmpl`](files/Caddyfile.tmpl))
 
-Saved as `/etc/varsis/Caddyfile.tmpl`, **not** directly as `/etc/caddy/Caddyfile`. Two reasons:
-
-1. Caddy isn't installed yet when `write_files` runs. If `/etc/caddy/Caddyfile` already existed when the package
-   was installed, dpkg would see a conflict with the package's own config file.
-2. It contains two placeholders, `__SITE__` and `__TLS__`, that depend on `DOMAIN`. The script fills them in
-   (section 9.8).
+A template, not the final `/etc/caddy/Caddyfile`: it contains placeholders (`__SITE__`, `__TLS__`, `__FRAMED__`)
+that depend on the settings. `start-caddy.sh` fills them in and writes the real file (section 9.9).
 
 Line by line:
 
-| Lines | Directive | What it does |
-|---|---|---|
-| 66 | `__SITE__ { … }` | Site address: a domain or an IP. Caddy enables HTTPS automatically for it and redirects `http://` to `https://` |
-| 67 | `__TLS__` | Becomes `tls internal` (certificate from Caddy's own local CA) or nothing (default: Let's Encrypt via the ACME protocol) |
-| 68 | `encode zstd gzip` | Compress responses (JS/CSS/JSON) if the browser supports it |
-| 70–76 | `header { … }` | Security headers on every response: **HSTS** (the browser only uses https for this host for a year), **nosniff** (don't guess file types: an uploaded "song" must never run as HTML/JS), **X-Frame-Options DENY** (no embedding in other sites, against clickjacking), **Referrer-Policy same-origin** (tokens in email links don't leak to other sites), `-Server` removes the header that names the server software |
-| 79–86 | `request_body … max_size` | `@upload` and `@small` are *named matchers*. Uploads may be up to 2 GB; every other request at most 1 MB, because the backend reads JSON bodies into memory and a huge body could exhaust it |
-| 88–94 | `handle /api/*` + `reverse_proxy` | Everything under `/api/` goes to the backend on `127.0.0.1:8000` |
-| 91 | `header_up X-Real-IP {remote_host}` | The backend's login rate limit counts attempts per IP and reads it from `X-Real-IP` (`backend/app/ratelimit.py`). Caddy *overwrites* the header with the real client address, so a client can't fake it |
-| 92 | `flush_interval -1` | Pass response data on immediately instead of buffering. Needed for streaming audio |
-| 96–100 | `handle` + `try_files` + `file_server` | Everything else is a static file from `/var/www/varsis`. `try_files {path} /index.html` serves `index.html` for paths that aren't files (e.g. `/album/12`), so the Vue router can handle them (single-page app) |
-| 102–105 | `log` | Access log as JSON in `/var/log/caddy/varsis-access.log`. Caddy rotates it itself (by default at 100 MB) |
+| Directive | What it does |
+|---|---|
+| `__SITE__ { … }` | Site address: a domain or an IP. Caddy enables HTTPS automatically for it and redirects `http://` to `https://` |
+| `__TLS__` | Becomes `tls internal` (certificate from Caddy's own local CA) or nothing (default: Let's Encrypt via the ACME protocol) |
+| `encode zstd gzip` | Compress responses (JS/CSS/JSON) if the browser supports it |
+| `header { … }` | Security headers on every response: **HSTS** (the browser only uses https for this host for a year), **nosniff** (don't guess file types: an uploaded "song" must never run as HTML/JS), **Referrer-Policy same-origin** (tokens in email links don't leak to other sites), `-Server` removes the header that names the server software. The deletion makes Caddy apply this block last, so nothing in it can be overridden per path |
+| `@framed` + `header @framed X-Frame-Options DENY` | No embedding in other sites (against clickjacking). Separate, with a matcher, so it can skip `/mailpit*`, which shows mails in a frame of its own |
+| `import /etc/caddy/mailpit.caddy` | Mailpit's inbox behind a password when `MAILPIT=true`, otherwise an empty file |
+| `request_body … max_size` | `@upload` and `@small` are *named matchers*. Uploads may be up to 2 GB; every other request at most 1 MB, because the backend reads JSON bodies into memory and a huge body could exhaust it |
+| `handle /api/*` + `reverse_proxy` | Everything under `/api/` goes to the backend on `127.0.0.1:8000` |
+| `header_up X-Real-IP {remote_host}` | The backend's login rate limit counts attempts per IP and reads it from `X-Real-IP` (`backend/app/ratelimit.py`). Caddy *overwrites* the header with the real client address, so a client can't fake it |
+| `flush_interval -1` | Pass response data on immediately instead of buffering. Needed for streaming audio |
+| `handle` + `try_files` + `file_server` | Everything else is a static file from `/var/www/varsis`. `try_files {path} /index.html` serves `index.html` for paths that aren't files (e.g. `/album/12`), so the Vue router can handle them (single-page app) |
+| `log` | Access log as JSON in `/var/log/caddy/varsis-access.log`. Caddy rotates it itself (by default at 100 MB) |
 
 `handle` blocks are mutually exclusive and checked most specific first, so `/api/...` never falls through to the
 file server.
@@ -150,10 +157,11 @@ file server.
 **Why Caddy and not nginx:** Caddy gets and renews TLS certificates by itself; with nginx you'd need certbot plus
 a renewal timer. It replaces both the old `frontend/nginx.conf` and the Caddy container from the Docker setup.
 
-## 8. write_files, part 3: systemd service (lines 109–139)
+## 8. systemd service ([`files/varsis-backend.service`](files/varsis-backend.service))
 
-`/etc/systemd/system/varsis-backend.service` tells systemd how to run the backend. It's written now but started
-by the script, after the code and config exist.
+Tells systemd how to run the backend. `setup-backend.sh` copies it to `/etc/systemd/system/` and starts it, after
+the code and config exist. ([`files/mailpit.service`](files/mailpit.service) is the same idea for Mailpit, with
+`DynamicUser`: systemd creates a throwaway user for it.)
 
 **`[Unit]`**
 
@@ -187,11 +195,27 @@ by the script, after the code and config exist.
 
 **`[Install]`** `WantedBy=multi-user.target`: `systemctl enable` makes it start on every normal boot.
 
-## 9. write_files, part 4: the setup script (lines 142–256)
+## 9. The setup scripts ([`scripts/`](scripts))
 
-`/usr/local/sbin/varsis-setup`, mode `0755` (executable). `sbin` because it's an admin tool meant for root.
+`runcmd` (section 10) runs them in this order:
 
-### Preamble (lines 145–148)
+| Script | Step |
+|---|---|
+| `common.sh` | Not a step: sourced by every script (settings, secrets, `log()`, site address) |
+| `install-dependencies.sh` | 9.1 Caddy and Node.js apt repositories |
+| `firewall.sh` | 9.2 ufw |
+| (runcmd itself) | 9.3 clone the repository |
+| `secrets.sh` | 9.4 generate secrets |
+| `setup-mailpit.sh` | 9.5 Mailpit (testing) |
+| `setup-postgresql.sh` | 9.6 role and database |
+| `setup-backend.sh` | 9.7 Python packages, `backend.env`, service |
+| `build-frontend.sh` | 9.8 Vue build |
+| `start-caddy.sh` | 9.9 Caddyfile, HTTPS |
+| `health-check.sh` | 9.10 wait for the backend |
+
+### Strict mode
+
+Every script starts with:
 
 ```bash
 set -euo pipefail
@@ -199,20 +223,41 @@ set -euo pipefail
 
 Bash "strict mode":
 
-- `-e`: stop at the first command that fails.
+- `-e`: stop at the first command that fails (the script then exits with an error, and runcmd's own `set -e`
+  stops the remaining steps).
 - `-u`: using an unset variable is an error (catches typos).
 - `-o pipefail`: a pipeline fails if *any* part fails, not only the last. Without it, a failed `curl` piped into
   `gpg` would go unnoticed.
 
+Each script runs in its own `bash` process, so a variable set in one step doesn't leak into the next. What they
+share comes from files, through `common.sh`.
+
+### common.sh
+
 ```bash
-set -a; . /etc/varsis/deploy.env; set +a
+. "$(dirname "$0")/common.sh"
 ```
 
-`.` (source) reads the settings file as bash. `set -a` auto-exports every variable it defines, `set +a` turns
-that off again. `log()` prefixes messages with `[varsis-setup]` so they're easy to find in
-`/var/log/cloud-init-output.log`.
+Every script *sources* it (runs it in its own shell, not as a separate program), so its variables become the
+script's variables. `$(dirname "$0")` is the scripts folder, wherever the repository is.
 
-### 9.1 Third-party apt repositories (lines 150–161)
+```bash
+set -a
+. /etc/varsis/deploy.env
+if [ -f /etc/varsis/secrets.env ]; then . /etc/varsis/secrets.env; fi
+set +a
+```
+
+`.` reads the settings file as bash. `set -a` auto-exports every variable it defines, `set +a` turns that off
+again. The secrets file only exists after `secrets.sh` (9.4). Then:
+
+- `FILES`: the path of [`files/`](files), for the config files the scripts install.
+- `log()`: prefixes messages with `[varsis-setup]` so they're easy to find in `/var/log/cloud-init-output.log`.
+- The site address: with `DOMAIN`, that name and Let's Encrypt (`TLS` empty). Without, `hostname -I` lists the
+  VM's IPs (the first is the one `incus list` shows) and Caddy uses its own CA (`TLS="tls internal"`).
+  `SITE_HOST` drops a `:port` (only used with port forwarding).
+
+### 9.1 Third-party apt repositories (`install-dependencies.sh`)
 
 For both Caddy and NodeSource:
 
@@ -228,20 +273,22 @@ stops dpkg from asking questions, since there's no terminal. The Caddy package a
 `caddy.service` and creates a `caddy` user. NodeSource's `node_24.x` is used because Vite 8 needs Node ≥ 20.19
 and Ubuntu 24.04 ships Node 18.
 
-### 9.2 Firewall (lines 163–168)
+### 9.2 Firewall (`firewall.sh`)
 
-- `ufw allow OpenSSH`: port 22. Allowed **before** enabling, otherwise you'd lock yourself out of SSH.
+- `ufw allow 22/tcp`: SSH. Allowed **before** enabling, otherwise you'd lock yourself out. By port number, not the
+  `OpenSSH` profile name: minimal images (e.g. Incus's) have no SSH server and so no such profile.
 - `ufw allow 80/tcp`: plain HTTP. Needed for Let's Encrypt's HTTP challenge and the http→https redirect.
 - `ufw allow 443`: TCP for HTTPS, and UDP for HTTP/3 (QUIC), which Caddy also offers.
 - `ufw --force enable`: turn it on without the "are you sure?" prompt. The default policy denies everything else
   incoming, so Postgres (5432) and the backend (8000) aren't reachable from outside even if they listened there.
 
-### 9.3 Get the code (lines 170–174)
+### 9.3 Get the code (in runcmd)
 
-`git clone --depth 1` fetches only the latest commit (faster, smaller). The `if` skips it when it's already
-there, so the script can run again.
+`git clone --depth 1` fetches only the latest commit (faster, smaller). `[ -d /opt/varsis/.git ] ||` skips it when
+it's already there, so runcmd can run again. This brings both the app and the setup scripts, which is why it
+happens in runcmd and not in a script.
 
-### 9.4 Secrets (lines 176–184)
+### 9.4 Secrets (`secrets.sh`)
 
 On the first run, two random values are generated with `openssl rand -hex 32` (32 random bytes = 64 hex
 characters):
@@ -250,11 +297,18 @@ characters):
 - `SECRET_KEY`: signs login cookies and email links. Anyone who knows it can log in as any user; the backend
   refuses to start if it's shorter than 32 characters.
 
-`umask 077` makes the new file readable only by root (mode 600) from the moment it's created; `umask 022` resets
-that. Because of the `if`, secrets are created **once**: a second run must not change the DB password or log
-everyone out. They're never in the repo or in user data, so publishing `user-data.yaml` leaks nothing.
+`umask 077` makes the new file readable only by root (mode 600) from the moment it's created. Because of the `if`,
+secrets are created **once**: a second run must not change the DB password or log everyone out. They're never in
+the repo or in user data, so publishing `user-data.yaml` leaks nothing.
 
-### 9.5 Database (lines 186–196)
+### 9.5 Mailpit (`setup-mailpit.sh`)
+
+Only with `MAILPIT=true`; otherwise the service is stopped and disabled. Mailpit isn't in apt, so a pinned release
+is downloaded from GitHub (skipped if that version is already installed). A random `MAILPIT_PASSWORD` is appended
+to `secrets.env` once; 9.9 puts the inbox at `/mailpit/` behind it. Then `files/mailpit.service` is installed and
+started.
+
+### 9.6 Database (`setup-postgresql.sh`)
 
 ```bash
 sudo -u postgres psql -v ON_ERROR_STOP=1 -q <<SQL
@@ -274,8 +328,8 @@ SQL
 - `DO … IF NOT EXISTS`: Postgres has no `CREATE ROLE IF NOT EXISTS`, so a small PL/pgSQL block checks first. That
   keeps it re-runnable.
 - `ON_ERROR_STOP=1`: psql exits with an error code on SQL errors, so `set -e` stops the script.
-- Next line: `createdb -O varsis varsis` creates the database `varsis` owned by role `varsis`, unless the
-  `SELECT` finds it already exists (`grep -q 1` succeeds → `||` skips `createdb`).
+- Then `createdb -O varsis varsis` creates the database `varsis` owned by role `varsis`, unless the `SELECT`
+  finds it already exists.
 
 Postgres on Ubuntu listens only on `localhost` by default, and the backend connects to `127.0.0.1` with the
 password (`scram-sha-256`).
@@ -283,7 +337,7 @@ password (`scram-sha-256`).
 The **tables** aren't created here: the backend creates them itself at startup (`Base.metadata.create_all` in
 `backend/app/main.py`).
 
-### 9.6 Backend (lines 198–232)
+### 9.7 Backend (`setup-backend.sh`)
 
 ```bash
 command -v uv >/dev/null || PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin pipx install uv
@@ -306,11 +360,8 @@ Creates `/opt/varsis/backend/.venv` and installs the backend's dependencies:
 - `UV_COMPILE_BYTECODE=1`: compile `.pyc` files now. The service can't write them later (`ProtectSystem=strict`),
   and startup is faster.
 
-```bash
-if [ -z "$DOMAIN" ]; then SITE=$(hostname -I | awk '{print $1}'); TLS="tls internal"; else SITE=$DOMAIN; TLS=""; fi
-```
-
-Picks the site address. `hostname -I` lists the VM's IPs; the first is the one `incus list` shows.
+With `MAILPIT=true`, the `SMTP_*` variables are replaced by Mailpit's (`127.0.0.1:1025`, no login, no TLS) before
+`backend.env` is written.
 
 ```bash
 install -d -o varsis -g varsis -m 0750 /var/lib/varsis /var/lib/varsis/music /var/lib/varsis/covers
@@ -326,11 +377,12 @@ Then `backend.env` is written with a here-document (again `umask 077` → mode 6
 
 Finally:
 
+- `files/varsis-backend.service` is copied to `/etc/systemd/system/`.
 - `systemctl daemon-reload`: systemd reads the new unit file.
 - `enable --now`: start on boot, and start now.
 - `restart`: on a re-run, pick up a changed env file or new code.
 
-### 9.7 Frontend (lines 234–241)
+### 9.8 Frontend (`build-frontend.sh`)
 
 - `npm ci`: install exactly what `package-lock.json` says (the npm equivalent of `uv sync --frozen`).
   `--no-audit --no-fund` skips network calls that only print messages.
@@ -339,29 +391,49 @@ Finally:
 
 Node is only a **build tool**. Nothing Node-based runs afterwards.
 
-### 9.8 Caddy (lines 243–248)
+### 9.9 Caddy (`start-caddy.sh`)
 
-- `sed` replaces `__SITE__` and `__TLS__` in the template and writes the real `/etc/caddy/Caddyfile`.
-- `caddy validate` checks the syntax first. If it's wrong, the script stops (`set -e`) instead of breaking the
-  running Caddy.
+- `/etc/caddy/mailpit.caddy`: with Mailpit, a `handle /mailpit*` block with `basic_auth` (the password as a bcrypt
+  hash from `caddy hash-password`) and `X-Frame-Options SAMEORIGIN`. Without Mailpit, an empty file.
+- `sed` replaces `__SITE__`, `__TLS__` and `__FRAMED__` (which paths get `X-Frame-Options DENY`: all, or all but
+  `/mailpit*`) in `files/Caddyfile.tmpl` and writes the real `/etc/caddy/Caddyfile`.
+- `runuser -u caddy -- caddy validate` checks the config first. If it's wrong, the script stops (`set -e`) instead
+  of breaking the running Caddy. It runs **as the caddy user**: validating opens the access log file, and as root
+  it would create it owned by root, so the real Caddy service (user `caddy`) couldn't write it and wouldn't start.
 - `reload-or-restart`: Caddy loads the new config without dropping connections. When it first sees the site
   address it gets the certificate: from Let's Encrypt (with a domain) or from its local CA (with an IP).
 
-### 9.9 Health check (lines 250–256)
+### 9.10 Health check (`health-check.sh`)
 
 The backend is polled up to 30 times, 2 seconds apart, on `/api/health`. `curl -f` fails on HTTP errors. If it
 never answers, the script exits with an error, so `cloud-init status` reports the deployment as **failed**
 instead of "done" with a broken app. On success it prints the URL.
 
-## 10. runcmd and final_message (lines 258–261)
+## 10. runcmd and final_message
 
 ```yaml
 runcmd:
-  - [/usr/local/sbin/varsis-setup]
+  - set -e
+  - . /etc/varsis/deploy.env
+  - '[ -d /opt/varsis/.git ] || git clone --depth 1 --branch "$REPO_REF" "$REPO_URL" /opt/varsis'
+  - cd /opt/varsis/deploy/cloud-init/scripts
+  - bash install-dependencies.sh
+  # … one line per step …
+  - bash health-check.sh
 ```
 
-The list form (`[...]`) runs the program directly, without a shell in between. All the logic lives in the
-script, which is easier to read, test (`bash -n`) and run again by hand than many YAML lines.
+cloud-init joins the list into one shell script (`/var/lib/cloud/instance/scripts/runcmd`) and runs it with `sh`
+at the end of boot. So the lines share one shell: the variables from `deploy.env` and the `cd` carry over to the
+next line.
+
+- `set -e`: without it, runcmd would carry on after a failed step. With it, the first failing step stops the rest
+  and cloud-init reports an error.
+- The clone line is quoted in YAML because it starts with `[`, which YAML would otherwise read as a list.
+- Each step is `bash <script>` from the cloned repository. The scripts are ordinary files, easy to read, test
+  (`bash -n`) and run one by one by hand.
+
+**Running it again** (after `git pull`, or after changing `deploy.env`): `sudo sh /var/lib/cloud/instance/scripts/runcmd`.
+The clone, secrets and database are skipped because they exist; everything else is redone.
 
 `final_message` is printed to the console and log when cloud-init finishes; `$UPTIME` is the seconds since
 boot, a handy measure of deployment speed.
@@ -370,20 +442,20 @@ boot, a handy measure of deployment speed.
 
 ## Timeline of a first boot
 
-1. **init:** `/etc/varsis/{deploy.env,Caddyfile.tmpl}`, the systemd unit and the setup script are written; users
-   `ubuntu` and `varsis` are created.
+1. **init:** `/etc/varsis/deploy.env` is written; users `ubuntu` and `varsis` are created.
 2. **config:** the deadsnakes PPA is added; runcmd is saved as a script.
 3. **final:** `apt update`; git, curl, gpg, ufw, postgresql, python3.13, pipx are installed (Postgres starts).
-4. **final, runcmd → varsis-setup:**
-   1. Caddy and NodeSource repos → install `caddy`, `nodejs`
-   2. firewall on
-   3. clone the code
-   4. generate secrets
-   5. create DB role and database
-   6. install backend deps, write `backend.env`, start the backend (it creates the tables)
-   7. build the frontend
-   8. configure Caddy (certificate)
-   9. health check
+4. **final, runcmd:**
+   1. clone the repository (app + setup scripts)
+   2. `install-dependencies.sh`: Caddy and NodeSource repos → install `caddy`, `nodejs`
+   3. `firewall.sh`: firewall on
+   4. `secrets.sh`: generate secrets
+   5. `setup-mailpit.sh`: Mailpit (if enabled)
+   6. `setup-postgresql.sh`: DB role and database
+   7. `setup-backend.sh`: backend deps, `backend.env`, start the backend (it creates the tables)
+   8. `build-frontend.sh`: build the frontend
+   9. `start-caddy.sh`: configure Caddy (certificate)
+   10. `health-check.sh`: wait for the backend
 5. `final_message` with the total time.
 
 ## Where things end up on the VM
@@ -393,7 +465,8 @@ boot, a handy measure of deployment speed.
 | `/etc/varsis/deploy.env` | Your settings (600) |
 | `/etc/varsis/secrets.env` | Generated DB password and SECRET_KEY (600) |
 | `/etc/varsis/backend.env` | Everything the backend gets as environment (600) |
-| `/opt/varsis/` | The git checkout; `backend/.venv` is the Python environment |
+| `/opt/varsis/` | The git checkout; `backend/.venv` is the Python environment; `deploy/cloud-init/scripts/` the setup steps |
+| `/var/lib/cloud/instance/scripts/runcmd` | runcmd as cloud-init saved it (run it again to redeploy) |
 | `/var/www/varsis/` | Built frontend |
 | `/var/lib/varsis/{music,covers}` | Uploaded data (owner `varsis`, 750) |
 | `/var/lib/postgresql/16/main` | Database files |
@@ -407,8 +480,11 @@ boot, a handy measure of deployment speed.
 - **Why doesn't uv download Python itself?** It could, but the assignment asks for package managers, and apt's
   Python gets security updates. uv would also put it in `/root/.local/share/uv`, which the `varsis` service user
   can't reach (`ProtectHome=true`).
-- **What happens if the script runs twice?** Clone, secrets, DB role and DB are skipped if they exist; packages,
+- **What happens if the setup runs twice?** Clone, secrets, DB role and DB are skipped if they exist; packages,
   build and configs are redone. So it doubles as the update command.
+- **Why are the scripts in the repository and not in user-data.yaml?** Readable, testable files, one per step,
+  like the Vagrant version, and they update with `git pull`. The cost: the repository must be public (the VM clones
+  it without a login), and script changes must be pushed before a new VM sees them.
 - **What if user data changes after the first boot?** cloud-init runs the per-instance modules only once per
   instance ID; a new VM is needed (or `cloud-init clean && reboot`).
 - **How is the backend protected from the internet?** It listens on 127.0.0.1, ufw blocks everything but

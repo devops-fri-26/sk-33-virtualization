@@ -10,6 +10,9 @@
 #   config: apt sources (deadsnakes PPA), runcmd is only *saved* as a script
 #   final:  packages -> scripts_user (runs the runcmd script)
 # so runcmd sees every package installed and every file written.
+#
+# runcmd clones the repository and runs the setup scripts from it (deploy/cloud-init/scripts/), one per step,
+# like the Vagrant version. The config files they install are in deploy/cloud-init/files/.
 
 package_update: true
 package_upgrade: false # faster first boot; unattended-upgrades (on by default) installs security fixes
@@ -46,10 +49,11 @@ write_files:
       # be reachable from the internet. Leave empty for a local VM: Caddy then uses the VM's IP address and a
       # certificate from its own local CA (browser warning).
       DOMAIN=devops-sk-33.lrk.si
-      # Local VM reached through port forwarding only (run-qemu.sh): the address the browser opens, host[:port],
+      # Local VM reached through port forwarding only: the address the browser opens, host[:port],
       # e.g. localhost:8443. Empty: DOMAIN, or else the VM's own IP. Ignored when DOMAIN is set.
       SITE=
-      # Git repository and branch to deploy.
+      # Git repository and branch to deploy. The setup scripts come from it too, so it must be reachable
+      # without a login (public).
       REPO_URL=https://github.com/grobolsek/varsis-app.git
       REPO_REF=main
       # Comma-separated; these accounts become admins.
@@ -67,268 +71,41 @@ write_files:
       # /etc/varsis/secrets.env (MAILPIT_PASSWORD).
       MAILPIT=false
 
-  # --- Caddy: HTTPS, static frontend, /api proxy. __SITE__, __TLS__, __FRAMED__ are filled in by varsis-setup -
-  - path: /etc/varsis/Caddyfile.tmpl
-    content: |
-      __SITE__ {
-      	__TLS__
-      	encode zstd gzip
-
-      	# This block is applied last (the "-Server" deletion makes Caddy defer it), so nothing here can be
-      	# overridden per path. X-Frame-Options is therefore separate, with a matcher.
-      	header {
-      		Strict-Transport-Security "max-age=31536000"
-      		X-Content-Type-Options nosniff
-      		Referrer-Policy same-origin
-      		-Server
-      	}
-      	# Every path, except /mailpit* when MAILPIT=true (it shows mails in a same-origin iframe).
-      	@framed __FRAMED__
-      	header @framed X-Frame-Options DENY
-
-      	# The backend reads JSON bodies into memory: keep them small. Only uploads are big.
-      	@upload path /api/upload
-      	request_body @upload {
-      		max_size 2GB
-      	}
-      	@small not path /api/upload
-      	request_body @small {
-      		max_size 1MB
-      	}
-
-      	# Mailpit inbox when MAILPIT=true, otherwise an empty file (written by varsis-setup).
-      	import /etc/caddy/mailpit.caddy
-
-      	handle /api/* {
-      		reverse_proxy 127.0.0.1:8000 {
-      			# The backend's rate limits key on this header; overwrite whatever the client sent.
-      			header_up X-Real-IP {remote_host}
-      			flush_interval -1
-      		}
-      	}
-
-      	handle {
-      		root * /var/www/varsis
-      		try_files {path} /index.html
-      		file_server
-      	}
-
-      	log {
-      		output file /var/log/caddy/varsis-access.log
-      		format json
-      	}
-      }
-
-  # --- Backend service ----------------------------------------------------------------------------------
-  - path: /etc/systemd/system/varsis-backend.service
-    content: |
-      [Unit]
-      Description=Varsis backend (FastAPI)
-      After=network-online.target postgresql.service
-      Wants=network-online.target
-      Requires=postgresql.service
-
-      [Service]
-      User=varsis
-      Group=varsis
-      WorkingDirectory=/opt/varsis/backend
-      EnvironmentFile=/etc/varsis/backend.env
-      ExecStart=/opt/varsis/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
-      Restart=on-failure
-      RestartSec=3
-
-      # Sandboxing: read-only system, writes only to the data folder.
-      NoNewPrivileges=true
-      ProtectSystem=strict
-      ProtectHome=true
-      PrivateTmp=true
-      PrivateDevices=true
-      ProtectKernelTunables=true
-      ProtectKernelModules=true
-      ProtectControlGroups=true
-      RestrictSUIDSGID=true
-      ReadWritePaths=/var/lib/varsis
-
-      [Install]
-      WantedBy=multi-user.target
-
-  # --- Mailpit (only enabled when MAILPIT=true): SMTP on 127.0.0.1:1025, web UI on 127.0.0.1:8025 behind Caddy ---
-  - path: /etc/systemd/system/mailpit.service
-    content: |
-      [Unit]
-      Description=Mailpit (test mail catcher)
-      After=network.target
-
-      [Service]
-      DynamicUser=true
-      StateDirectory=mailpit
-      ExecStart=/usr/local/bin/mailpit --listen 127.0.0.1:8025 --smtp 127.0.0.1:1025 --webroot /mailpit/ --database /var/lib/mailpit/mailpit.db
-      Restart=on-failure
-      NoNewPrivileges=true
-      ProtectSystem=strict
-      ProtectHome=true
-      PrivateTmp=true
-
-      [Install]
-      WantedBy=multi-user.target
-
-  # --- First-boot setup, run from runcmd ---------------------------------------------------------------
-  - path: /usr/local/sbin/varsis-setup
-    permissions: "0755"
-    content: |
-      #!/bin/bash
-      set -euo pipefail
-      set -a; . /etc/varsis/deploy.env; set +a
-      log() { echo "[varsis-setup] $*"; }
-
-      # 1. Third-party apt repos (Caddy, Node 24 for Vite 8), keys pinned per repo with signed-by.
-      log "apt repos"
-      curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/gpg.key \
-        | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-      echo "deb [signed-by=/usr/share/keyrings/caddy-stable-archive-keyring.gpg] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main" \
-        > /etc/apt/sources.list.d/caddy-stable.list
-      curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
-        | gpg --dearmor --yes -o /usr/share/keyrings/nodesource.gpg
-      echo "deb [signed-by=/usr/share/keyrings/nodesource.gpg] https://deb.nodesource.com/node_24.x nodistro main" \
-        > /etc/apt/sources.list.d/nodesource.list
-      apt-get update -q
-      DEBIAN_FRONTEND=noninteractive apt-get install -y -q caddy nodejs
-
-      # 2. Firewall: SSH, HTTP (certificate checks + redirect), HTTPS incl. HTTP/3.
-      log "firewall"
-      ufw allow 22/tcp # by port: minimal images (e.g. Incus) have no OpenSSH ufw profile
-      ufw allow 80/tcp
-      ufw allow 443
-      ufw --force enable
-
-      # 3. Code
-      log "clone $REPO_URL ($REPO_REF)"
-      if [ ! -d /opt/varsis/.git ]; then
-        git clone --depth 1 --branch "$REPO_REF" "$REPO_URL" /opt/varsis
-      fi
-
-      # 4. Secrets, generated once on this VM and never stored in the repo.
-      if [ ! -f /etc/varsis/secrets.env ]; then
-        log "generate secrets"
-        umask 077
-        printf 'DB_PASSWORD=%s\nSECRET_KEY=%s\n' "$(openssl rand -hex 32)" "$(openssl rand -hex 32)" \
-          > /etc/varsis/secrets.env
-        umask 022
-      fi
-      . /etc/varsis/secrets.env
-
-      # 4b. Mailpit (testing): pinned release from GitHub; the backend's mail goes to it instead of SMTP_*.
-      MAILPIT_VERSION=v1.33.0
-      if [ "${MAILPIT:-false}" = "true" ]; then
-        log "mailpit $MAILPIT_VERSION"
-        if [ "$(/usr/local/bin/mailpit version 2>/dev/null | awk '{print $2}')" != "$MAILPIT_VERSION" ]; then
-          curl -fsSL "https://github.com/axllent/mailpit/releases/download/$MAILPIT_VERSION/mailpit-linux-$(dpkg --print-architecture).tar.gz" \
-            | tar -xz -C /usr/local/bin mailpit
-        fi
-        if [ -z "${MAILPIT_PASSWORD:-}" ]; then
-          MAILPIT_PASSWORD=$(openssl rand -hex 16)
-          (umask 077; echo "MAILPIT_PASSWORD=$MAILPIT_PASSWORD" >> /etc/varsis/secrets.env)
-        fi
-        SMTP_HOST=127.0.0.1 SMTP_PORT=1025 SMTP_USER= SMTP_PASS= SMTP_TLS=false
-        systemctl daemon-reload
-        systemctl enable --now mailpit
-      else
-        systemctl disable --now mailpit 2>/dev/null || true
-      fi
-
-      # 5. PostgreSQL: role and database, local connections only (Ubuntu's default listen_addresses=localhost).
-      log "database"
-      sudo -u postgres psql -v ON_ERROR_STOP=1 -q <<SQL
-      DO \$\$ BEGIN
-        IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'varsis') THEN
-          CREATE ROLE varsis LOGIN PASSWORD '$DB_PASSWORD';
-        END IF;
-      END \$\$;
-      SQL
-      sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='varsis'" | grep -q 1 \
-        || sudo -u postgres createdb -O varsis varsis
-
-      # 6. Backend: uv (via pipx, global) installs the exact versions from uv.lock with Python 3.13.
-      log "backend"
-      command -v uv >/dev/null || PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin pipx install uv
-      cd /opt/varsis/backend
-      UV_PYTHON_DOWNLOADS=never UV_COMPILE_BYTECODE=1 uv sync --frozen --no-dev --python python3.13
-
-      # SITE: the address in the browser and in mail links. SITE_HOST: what Caddy serves and makes a certificate
-      # for. They differ only with port forwarding (localhost:8443 -> the VM's 443): Caddy matches the host name.
-      if [ -n "$DOMAIN" ]; then
-        SITE=$DOMAIN
-        TLS=""
-      else
-        SITE=${SITE:-$(hostname -I | awk '{print $1}')}
-        TLS="tls internal"
-      fi
-      SITE_HOST=${SITE%:*}
-
-      install -d -o varsis -g varsis -m 0750 /var/lib/varsis /var/lib/varsis/music /var/lib/varsis/covers
-      umask 077
-      cat > /etc/varsis/backend.env <<ENV
-      DATABASE_URL=postgresql+asyncpg://varsis:$DB_PASSWORD@127.0.0.1:5432/varsis
-      SECRET_KEY=$SECRET_KEY
-      APP_URL=https://$SITE
-      ADMIN_EMAILS=$ADMIN_EMAILS
-      DEFAULT_QUOTA_GB=$DEFAULT_QUOTA_GB
-      SMTP_HOST=${SMTP_HOST:-localhost}
-      SMTP_PORT=$SMTP_PORT
-      SMTP_USER=$SMTP_USER
-      SMTP_PASS=$SMTP_PASS
-      SMTP_FROM=$SMTP_FROM
-      SMTP_TLS=$SMTP_TLS
-      MUSIC_DIR=/var/lib/varsis/music
-      COVERS_DIR=/var/lib/varsis/covers
-      ENV
-      umask 022
-      systemctl daemon-reload
-      systemctl enable --now varsis-backend
-      systemctl restart varsis-backend
-
-      # 7. Frontend: build once, Caddy serves the files. Node is only a build tool here.
-      log "frontend"
-      cd /opt/varsis/frontend
-      npm ci --no-audit --no-fund
-      npm run build
-      rm -rf /var/www/varsis
-      install -d /var/www
-      cp -r dist /var/www/varsis
-
-      # 8. Caddy
-      log "caddy ($SITE)"
-      install -d -o caddy -g caddy /var/log/caddy
-      if [ "${MAILPIT:-false}" = "true" ]; then
-        cat > /etc/caddy/mailpit.caddy <<CADDY
-      handle /mailpit* {
-      	basic_auth {
-      		mailpit $(caddy hash-password --plaintext "$MAILPIT_PASSWORD")
-      	}
-      	header X-Frame-Options SAMEORIGIN
-      	reverse_proxy 127.0.0.1:8025
-      }
-      CADDY
-        FRAMED="not path /mailpit*"
-      else
-        : > /etc/caddy/mailpit.caddy
-        FRAMED="path *"
-      fi
-      sed -e "s|__SITE__|$SITE_HOST|" -e "s|__TLS__|$TLS|" -e "s|__FRAMED__|$FRAMED|" \
-        /etc/varsis/Caddyfile.tmpl > /etc/caddy/Caddyfile
-      # As the caddy user: validate opens the log file, and as root it would create it owned by root.
-      runuser -u caddy -- caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
-      systemctl reload-or-restart caddy
-
-      # 9. Wait for the backend to answer.
-      for i in $(seq 30); do
-        curl -fs http://127.0.0.1:8000/api/health >/dev/null && break
-        sleep 2
-      done
-      curl -fs http://127.0.0.1:8000/api/health >/dev/null || { log "backend not healthy"; exit 1; }
-      log "done: https://$SITE"
-
+# runcmd is saved as one shell script and run at the end of boot. set -e: stop at the first step that fails, so
+# cloud-init reports an error. Run it again later (e.g. after git pull): sudo sh /var/lib/cloud/instance/scripts/runcmd
 runcmd:
-  - [/usr/local/sbin/varsis-setup]
+  - set -e
+  # REPO_URL, REPO_REF
+  - . /etc/varsis/deploy.env
+  # Get the code (and the setup scripts); skipped if it's already there
+  - '[ -d /opt/varsis/.git ] || git clone --depth 1 --branch "$REPO_REF" "$REPO_URL" /opt/varsis'
+  - cd /opt/varsis/deploy/cloud-init/scripts
+
+  # apt repositories for Caddy and Node.js, then those two packages
+  - bash install-dependencies.sh
+
+  # ufw: 22, 80, 443
+  - bash firewall.sh
+
+  # Database password and SECRET_KEY, generated once on the VM
+  - bash secrets.sh
+
+  # Mailpit (only with MAILPIT=true)
+  - bash setup-mailpit.sh
+
+  # PostgreSQL role and database
+  - bash setup-postgresql.sh
+
+  # Python packages from uv.lock, /etc/varsis/backend.env, backend service
+  - bash setup-backend.sh
+
+  # Build the Vue app into /var/www/varsis
+  - bash build-frontend.sh
+
+  # Caddyfile from the template, HTTPS certificate
+  - bash start-caddy.sh
+
+  # Wait until the backend answers
+  - bash health-check.sh
 
 final_message: "Varsis cloud-init finished after $UPTIME s. Details: /var/log/cloud-init-output.log"
