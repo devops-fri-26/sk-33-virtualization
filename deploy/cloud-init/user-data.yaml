@@ -46,6 +46,9 @@ write_files:
   - path: /etc/varsis/deploy.env
     permissions: "0600"
     content: |
+      # Read by bash: a value with spaces or special characters ($ & ; ...) goes in single quotes, e.g.
+      # SMTP_PASS='abc$def'. No quote characters or backslashes inside a value. ADMIN_EMAILS without spaces.
+      #
       # Public host name for HTTPS (Let's Encrypt). Its DNS A record must point at this VM and ports 80/443 must
       # be reachable from the internet. Leave empty for a local VM: Caddy then uses the VM's IP address and a
       # certificate from its own local CA (browser warning).

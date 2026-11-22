@@ -42,6 +42,9 @@ Edit the `/etc/varsis/deploy.env` block at the top of `write_files` in `user-dat
 | `SMTP_*` | Mail provider for sign-up and password mails. Empty: no mails are sent |
 | `MAILPIT` | Testing only. `true`: installs [Mailpit](https://mailpit.axllent.org) on the VM and sends all mail there instead of `SMTP_*`. Inbox at `https://<site>/mailpit/`, user `mailpit`, password `MAILPIT_PASSWORD` in `/etc/varsis/secrets.env` |
 
+The block is read by bash: put a value with spaces or special characters in single quotes (`SMTP_PASS='abc$def'`),
+don't use quote characters or backslashes inside a value, and write `ADMIN_EMAILS` without spaces.
+
 `SECRET_KEY` and the database password are never in the repo: the VM generates them into
 `/etc/varsis/secrets.env` (mode 600).
 

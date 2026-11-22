@@ -145,6 +145,9 @@ creating an Ubuntu 24.04 server.
 | `SMTP_*` | A real mail provider (production) |
 | `MAILPIT` | `true`: all mail goes to Mailpit instead |
 
+The block is read by bash: put a value with spaces or special characters in single quotes (`SMTP_PASS='abc$def'`),
+don't use quote characters or backslashes inside a value, and write `ADMIN_EMAILS` without spaces.
+
 ## 5. How the cloud-config works
 
 cloud-init runs its modules in a fixed order, in three stages:

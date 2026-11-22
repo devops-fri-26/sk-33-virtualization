@@ -124,6 +124,12 @@ its own data folder, not root.
 The **only place you edit before launching**. It's a list of `NAME=value` lines that bash reads later
 (`. /etc/varsis/deploy.env`). Mode `0600` means only root can read it, because it may contain the SMTP password.
 
+Because bash reads it, a value with spaces or special characters needs single quotes: `SMTP_PASS='abc$def'`
+(unquoted, bash would replace `$def` with an empty variable, and a space would end the value). The values are
+later written into `backend.env`, which systemd reads with its own rules: it keeps spaces and `$` but drops
+backslashes, so quote characters and backslashes inside a value don't work. `ADMIN_EMAILS` is written without
+spaces (`a@x.com,b@y.com`).
+
 | Variable | Effect |
 |---|---|
 | `DOMAIN` | Empty: local VM, HTTPS on the VM's IP with a self-signed certificate. Set: a real Let's Encrypt certificate for that name |
