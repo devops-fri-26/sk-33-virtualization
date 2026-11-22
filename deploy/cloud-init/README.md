@@ -28,6 +28,7 @@ flowchart LR
 | PostgreSQL 16 | Ubuntu | Listens on localhost only; password generated at first boot |
 | Frontend | Node 24 from NodeSource, `npm ci && npm run build` | Only the build output is served |
 | ufw | Ubuntu | Open: 22, 80, 443 |
+| unattended-upgrades | Ubuntu | Daily updates: Ubuntu's security updates, plus Caddy and Python 3.13 (deadsnakes); its config is in `write_files` |
 
 ## Settings
 
@@ -112,6 +113,7 @@ curl -s http://127.0.0.1:8000/api/health
 sudo journalctl -u varsis-backend -f          # backend log
 sudo tail -f /var/log/caddy/varsis-access.log # requests
 sudo ufw status
+sudo unattended-upgrade --dry-run --debug | grep "Allowed origins"   # automatic updates: which repositories
 ```
 
 ### Mails with Mailpit

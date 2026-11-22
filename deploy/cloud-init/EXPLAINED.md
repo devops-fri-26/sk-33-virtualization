@@ -500,7 +500,8 @@ boot, a handy measure of deployment speed.
 1. **init:** `/etc/varsis/deploy.env` and the unattended-upgrades config are written; users `ubuntu` and `varsis`
    are created.
 2. **config:** the deadsnakes PPA is added; runcmd is saved as a script.
-3. **final:** `apt update`; git, curl, gpg, ufw, postgresql, python3.13, pipx are installed (Postgres starts).
+3. **final:** `apt update`; git, curl, gpg, ufw, postgresql, python3.13, pipx, unattended-upgrades are installed
+   (Postgres starts).
 4. **final, runcmd:**
    1. clone the repository (app + setup scripts)
    2. `install-dependencies.sh`: Caddy and NodeSource repos → install `caddy`, `nodejs`
