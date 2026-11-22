@@ -36,7 +36,7 @@ flowchart LR
 | Backend (FastAPI on uvicorn, Python 3.13) | deadsnakes PPA (apt), packages from `uv.lock` | REST API |
 | PostgreSQL 16 | Ubuntu apt | Database, peer authentication over the Unix socket |
 | Frontend (Vue) | built with Node.js 24 from NodeSource's apt repository | Static files served by nginx |
-| Mailpit | pinned GitHub release | Catches every mail the app sends |
+| Mailpit | pinned GitHub release, SHA-256 checked | Catches every mail the app sends |
 | ufw | Ubuntu apt | Firewall: only 22 and 443 |
 
 ## Requirements
@@ -113,13 +113,13 @@ needs an NFS server and root on the host.
 
 | Script | What it does |
 |---|---|
-| `install-dependencies.sh` | Adds the deadsnakes PPA and NodeSource's apt repository (key pinned with `signed-by`); installs nginx, ssl-cert, PostgreSQL, Python 3.13, pipx, Node.js, rsync, ufw; installs `uv` |
+| `install-dependencies.sh` | Adds the deadsnakes PPA and NodeSource's apt repository (key pinned with `signed-by`); installs nginx, ssl-cert, PostgreSQL, Python 3.13, pipx, Node.js, rsync, ufw; installs `uv` (pinned version) |
 | `create-users-and-folders.sh` | System user `varsis` (no shell); `/opt/varsis` (code), `/etc/varsis` (settings, root writes / varsis reads), `/var/lib/varsis` (music, covers), `/var/www/varsis` (frontend) |
 | `setup-postgresql.sh` | Role and database `varsis`. **No password:** peer authentication over the Unix socket (OS user `varsis` = DB role `varsis`) |
 | `configuration.sh` | Generates `SECRET_KEY` once into `/etc/varsis/secrets.env` (600); writes `/etc/varsis/backend.env` (640, group varsis) |
 | `setup-backend.sh` | `rsync` of the synced code to `/opt/varsis` (owned by varsis); `uv sync --frozen` installs the exact versions from `uv.lock` |
 | `build-frontend.sh` | `npm ci && npm run build`, copied to `/var/www/varsis` |
-| `setup-mailpit.sh` | Pinned Mailpit release (not in apt) |
+| `setup-mailpit.sh` | Pinned Mailpit release (not in apt), checked against its SHA-256 before it's unpacked |
 | `services.sh` | Installs the systemd units from `files/`, starts them, waits for `/api/health` |
 | `start-nginx.sh` | nginx site from `files/` with the snakeoil certificate, default site off, `nginx -t`; ufw allows 22 and 443 |
 

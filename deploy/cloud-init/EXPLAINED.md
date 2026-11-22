@@ -304,7 +304,10 @@ the repo or in user data, so publishing `user-data.yaml` leaks nothing.
 ### 9.5 Mailpit (`setup-mailpit.sh`)
 
 Only with `MAILPIT=true`; otherwise the service is stopped and disabled. Mailpit isn't in apt, so a pinned release
-is downloaded from GitHub (skipped if that version is already installed). A random `MAILPIT_PASSWORD` is appended
+is downloaded from GitHub (skipped if that version is already installed). The archive goes to a temporary file
+first and is checked with `sha256sum -c` against `MAILPIT_SHA256`, the hash GitHub shows for that file on the
+release page. Only if it matches is the `mailpit` binary unpacked into `/usr/local/bin`; a replaced or damaged
+download stops the setup (`set -e`). A random `MAILPIT_PASSWORD` is appended
 to `secrets.env` once; 9.9 puts the inbox at `/mailpit/` behind it. Then `files/mailpit.service` is installed and
 started.
 
@@ -340,11 +343,15 @@ The **tables** aren't created here: the backend creates them itself at startup (
 ### 9.7 Backend (`setup-backend.sh`)
 
 ```bash
-command -v uv >/dev/null || PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin pipx install uv
+UV_VERSION=0.13.6
+if [ "$(uv --version 2>/dev/null | awk '{print $2}')" != "$UV_VERSION" ]; then
+    PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin pipx install --force "uv==$UV_VERSION"
+fi
 ```
 
-Install **uv** (a fast Python package manager) unless it's already there. Setting `PIPX_HOME`/`PIPX_BIN_DIR`
-makes it a system-wide install (`/usr/local/bin/uv`) instead of in root's home.
+Install **uv** (a fast Python package manager) at a pinned version, unless exactly that version is already there
+(`uv --version` prints `uv 0.13.6 …`). Pinned, so a new uv release can't change how the backend is installed.
+Setting `PIPX_HOME`/`PIPX_BIN_DIR` makes it a system-wide install (`/usr/local/bin/uv`) instead of in root's home.
 
 ```bash
 UV_PYTHON_DOWNLOADS=never UV_COMPILE_BYTECODE=1 uv sync --frozen --no-dev --python python3.13

@@ -27,5 +27,9 @@ echo "deb [signed-by=/usr/share/keyrings/nodesource.gpg] https://deb.nodesource.
 apt-get update
 apt-get install -y nginx ssl-cert postgresql python3.13 python3.13-venv pipx nodejs rsync ufw curl
 
-# uv, installed once for all users
-command -v uv >/dev/null || PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin pipx install uv
+# uv, installed with pipx for all users, at a pinned version (it reads this uv.lock); reinstalled only when another
+# version is there.
+UV_VERSION=0.13.6
+if [ "$(uv --version 2>/dev/null | awk '{print $2}')" != "$UV_VERSION" ]; then
+    PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin pipx install --force "uv==$UV_VERSION"
+fi

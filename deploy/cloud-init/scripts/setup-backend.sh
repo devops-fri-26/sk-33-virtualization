@@ -4,10 +4,15 @@ set -euo pipefail
 . "$(dirname "$0")/common.sh"
 log "backend"
 
-# uv (installed once with pipx, for all users) installs exactly the versions in uv.lock (--frozen), without dev
-# tools, with Python 3.13 from apt (no downloaded Python). Bytecode is compiled now: the sandboxed service can't
-# write it later.
-command -v uv >/dev/null || PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin pipx install uv
+# uv, installed with pipx for all users, at a pinned version (it reads this uv.lock); reinstalled only when another
+# version is there.
+UV_VERSION=0.13.6
+if [ "$(uv --version 2>/dev/null | awk '{print $2}')" != "$UV_VERSION" ]; then
+    PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin pipx install --force "uv==$UV_VERSION"
+fi
+
+# uv installs exactly the versions in uv.lock (--frozen), without dev tools, with Python 3.13 from apt (no
+# downloaded Python). Bytecode is compiled now: the sandboxed service can't write it later.
 cd /opt/varsis/backend
 UV_PYTHON_DOWNLOADS=never UV_COMPILE_BYTECODE=1 uv sync --frozen --no-dev --python python3.13
 

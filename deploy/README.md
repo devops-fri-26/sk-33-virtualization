@@ -61,7 +61,7 @@ flowchart LR
 | 2 | **Backend** (FastAPI on uvicorn, Python 3.13) | REST API: accounts, auth, library, uploads, playlists | Python from the deadsnakes PPA (apt); Python packages pinned in `uv.lock`, installed with `uv` |
 | 3 | **PostgreSQL 16** | Database: users, tracks, albums, playlists | Ubuntu apt |
 | 4 | **Frontend** (Vue 3 + Tailwind) | Single-page web app; built once at boot, then only static files | Node.js 24 from the NodeSource apt repository (build tool only) |
-| 5 | **Mailpit** | Catches every email the app sends (verification, password reset) and shows it in a web UI | Pinned GitHub release binary (not packaged in apt) |
+| 5 | **Mailpit** | Catches every email the app sends (verification, password reset) and shows it in a web UI | Pinned GitHub release binary, checked against its SHA-256 (not packaged in apt) |
 | 6 | **ufw** | Host firewall inside the VM: only 22, 80, 443 open | Ubuntu apt |
 | | **systemd** | Runs the backend and Mailpit as sandboxed services | (part of Ubuntu) |
 
@@ -219,7 +219,7 @@ Details per line: [`cloud-init/EXPLAINED.md`](cloud-init/EXPLAINED.md).
 | **Secrets** | Generated on the VM at first boot into `/etc/varsis/secrets.env` (mode 600); never in git |
 | **Network exposure** | Backend, PostgreSQL and Mailpit listen on `127.0.0.1` only; ufw allows 22/80/443; Mailpit UI behind a password (bcrypt, Caddy `basic_auth`) |
 | **Process isolation** | Backend runs as its own unprivileged `varsis` user with systemd sandboxing (`ProtectSystem=strict`, `NoNewPrivileges`, `PrivateTmp`, `PrivateDevices`, writes only `/var/lib/varsis`); Mailpit with `DynamicUser` |
-| **Supply chain** | apt repository keys pinned per repository (`signed-by`); Python dependencies locked (`uv sync --frozen`); Mailpit release pinned to a version |
+| **Supply chain** | apt repository keys pinned per repository (`signed-by`); Python dependencies locked (`uv sync --frozen`), uv itself pinned; Mailpit release pinned to a version and checked against its SHA-256 |
 | **Updates** | `unattended-upgrades` (on by default in the Ubuntu image) installs security fixes |
 
 ![Browser: secure connection to devops-sk-33.lrk.si](img/cert.png)
@@ -283,7 +283,8 @@ Details, every script explained, and a comparison with this version: [`vagrant/R
 
 - Mailpit is a **development** mail catcher: in real production, `SMTP_*` would point at a mail provider and
   `MAILPIT=false`.
-- Mailpit is downloaded from GitHub (pinned version), as it isn't packaged in Ubuntu's apt repositories.
+- Mailpit is downloaded from GitHub (pinned version, SHA-256 checked), as it isn't packaged in Ubuntu's apt
+  repositories.
 - cloud-init only runs on a VM's **first** boot: changed settings need a new VM (or editing
   `/etc/varsis/deploy.env` and re-running `sh /var/lib/cloud/instance/scripts/runcmd`).
 - One VM, no backups or monitoring dashboards yet.
