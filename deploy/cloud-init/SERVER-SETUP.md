@@ -4,9 +4,20 @@ How Varsis was deployed on the course server `devops-sk-33.lrk.si`: an Ubuntu 24
 and [`user-data.yaml`](user-data.yaml) sets up everything inside that VM at first boot. Caddy gets a valid
 Let's Encrypt certificate.
 
-```
-internet ──▶ host 88.200.24.30 :80/:443 ──(Incus proxy, NAT)──▶ VM 10.182.95.10 :80/:443 ──▶ Caddy ──▶ backend, PostgreSQL, Mailpit
-                                  └── incusbr0 10.182.95.1/24 (DHCP, DNS, NAT to the internet for the VM)
+```mermaid
+flowchart LR
+    internet(["Internet<br/>visitors · Let's Encrypt"])
+    subgraph host["Host devops-sk-33"]
+        nic["enp5s0<br/>88.200.24.30"]
+        proxy["Incus proxy devices<br/>nat=true (DNAT)<br/>:80 → :80 · :443 → :443"]
+        bridge["incusbr0 · 10.182.95.1/24<br/>DHCP + DNS (dnsmasq)<br/>NAT to the internet"]
+        subgraph vm["VM varsis · 10.182.95.10"]
+            caddy["Caddy :80 / :443"]
+            app["backend · PostgreSQL · Mailpit"]
+        end
+    end
+    internet --> nic --> proxy --> bridge --> caddy --> app
+    vm -.->|"apt, git clone (outgoing)"| bridge -.-> internet
 ```
 
 Values used on our server (replace with yours):

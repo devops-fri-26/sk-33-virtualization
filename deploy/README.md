@@ -30,17 +30,29 @@ The goal of this homework: **one file, [`cloud-init/user-data.yaml`](cloud-init/
 Ubuntu 24.04 VM into a production deployment** of the whole stack, with HTTPS, without any manual step inside the
 VM.
 
-![Varsis login page on devops-sk-33.lrk.si](cloud-init/img/varsis.png)
+![Varsis login page on devops-sk-33.lrk.si](img/varsis.png)
 
 ## 2. Architecture and components
 
-```
-                    ┌──────────────────────── Ubuntu 24.04 VM (Incus) ────────────────────────┐
-browser ──https──▶  │ Caddy :443 ──┬── /api/*     ──▶ uvicorn + FastAPI  127.0.0.1:8000 ──▶ PostgreSQL 127.0.0.1:5432
-                    │   (TLS, LE)  ├── /mailpit/* ──▶ Mailpit web UI     127.0.0.1:8025       │
-                    │              └── /*         ──▶ /var/www/varsis (built Vue app)          │
-                    │ backend ──SMTP──▶ Mailpit 127.0.0.1:1025                                  │
-                    └──────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+    browser(["Browser"])
+    subgraph host["Host devops-sk-33 · 88.200.24.30"]
+        proxy["Incus proxy (NAT)<br/>:80 · :443"]
+        subgraph vm["Ubuntu 24.04 VM (Incus) · 10.182.95.10"]
+            caddy["Caddy :443<br/>HTTPS · Let's Encrypt"]
+            static["/var/www/varsis<br/>built Vue app"]
+            backend["Backend<br/>uvicorn + FastAPI<br/>127.0.0.1:8000"]
+            db[("PostgreSQL<br/>127.0.0.1:5432")]
+            mailpit["Mailpit<br/>SMTP 127.0.0.1:1025<br/>UI 127.0.0.1:8025"]
+        end
+    end
+    browser -->|"HTTPS"| proxy --> caddy
+    caddy -->|"/*"| static
+    caddy -->|"/api/*"| backend
+    caddy -->|"/mailpit/*"| mailpit
+    backend -->|"SQL"| db
+    backend -->|"SMTP"| mailpit
 ```
 
 | # | Component | Role | Installed from |
@@ -115,7 +127,7 @@ incus exec varsis -- tail -f /var/log/cloud-init-output.log    # … [varsis-set
 including all package installs and the frontend build): `Varsis cloud-init finished after 163.65 s` in the
 screenshot below.
 
-![End of cloud-init-output.log: Caddy configured, "[varsis-setup] done", total time](cloud-init/img/deploy.png)
+![End of cloud-init-output.log: Caddy configured, "[varsis-setup] done", total time](img/deploy.png)
 
 The same `user-data.yaml` also works unchanged on any cloud provider: paste it into the "user data" field when
 creating an Ubuntu 24.04 server.
@@ -141,6 +153,24 @@ cloud-init runs its modules in a fixed order, in three stages:
 | **init** | `write_files`, `users_groups` | Settings, Caddyfile template, systemd units and the setup script are written; then the `varsis` system user is created |
 | **config** | `apt_configure`, `runcmd` | The deadsnakes PPA is added; `runcmd` is only **saved** as a script here, not run |
 | **final** | `package_update_upgrade_install`, `scripts_user` | `packages:` are installed, **then** the saved `runcmd` script runs |
+
+```mermaid
+flowchart TD
+    subgraph init["1 · init stage"]
+        wf["write_files<br/>/etc/varsis/deploy.env"] --> users["users<br/>varsis system user"]
+    end
+    subgraph config["2 · config stage"]
+        apt["apt<br/>deadsnakes PPA"] --> save["runcmd<br/>only saved as a script"]
+    end
+    subgraph final["3 · final stage"]
+        pkgs["packages<br/>git, postgresql, python3.13, …"] --> run["scripts_user<br/>runs the saved runcmd"]
+    end
+    init --> config --> final
+    run --> clone["git clone (app + scripts)"]
+    clone --> s1["install-dependencies.sh"] --> s2["firewall.sh"] --> s3["secrets.sh"]
+    s3 --> s4["setup-mailpit.sh"] --> s5["setup-postgresql.sh"] --> s6["setup-backend.sh"]
+    s6 --> s7["build-frontend.sh"] --> s8["start-caddy.sh"] --> s9["health-check.sh"]
+```
 
 So `runcmd` already runs after every package from `packages:` is installed (the question from the assignment tip);
 no extra ordering module is needed. Because `write_files` runs **before** the `varsis` user exists, no file written
@@ -192,7 +222,7 @@ Details per line: [`cloud-init/EXPLAINED.md`](cloud-init/EXPLAINED.md).
 | **Supply chain** | apt repository keys pinned per repository (`signed-by`); Python dependencies locked (`uv sync --frozen`); Mailpit release pinned to a version |
 | **Updates** | `unattended-upgrades` (on by default in the Ubuntu image) installs security fixes |
 
-![Browser: secure connection to devops-sk-33.lrk.si](cloud-init/img/cert.png)
+![Browser: secure connection to devops-sk-33.lrk.si](img/cert.png)
 
 ## 7. Logging
 

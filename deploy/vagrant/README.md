@@ -7,11 +7,27 @@ scripts in [`scripts/`](scripts). Unlike the cloud-init version (which clones th
 **Development only:** self-signed certificate, Mailpit instead of a mail provider, reachable only from this computer.
 The production deployment is the [cloud-init version](../cloud-init).
 
-```
-host: https://localhost:8443 ──(Vagrant forwarded port)──▶ VM :443 nginx ──┬── /api/*     ──▶ uvicorn + FastAPI 127.0.0.1:8000 ──▶ PostgreSQL (Unix socket)
-                                                                            ├── /mailpit/* ──▶ Mailpit web UI   127.0.0.1:8025
-                                                                            └── /*         ──▶ /var/www/varsis (built Vue app)
-                                                           backend ──SMTP──▶ Mailpit 127.0.0.1:1025
+```mermaid
+flowchart LR
+    subgraph laptop["Your computer"]
+        browser(["Browser<br/>https://localhost:8443"])
+        repo[("Local checkout<br/>of the repository")]
+        subgraph vm["Vagrant VM (libvirt) · Ubuntu 24.04"]
+            nginx["nginx :443<br/>self-signed certificate"]
+            static["/var/www/varsis<br/>built Vue app"]
+            backend["Backend<br/>uvicorn + FastAPI<br/>127.0.0.1:8000"]
+            db[("PostgreSQL<br/>Unix socket, peer auth")]
+            mailpit["Mailpit<br/>SMTP 127.0.0.1:1025<br/>UI 127.0.0.1:8025"]
+            src["/varsis-src → /opt/varsis"]
+        end
+    end
+    browser -->|"forwarded port<br/>8443 → 443"| nginx
+    nginx -->|"/*"| static
+    nginx -->|"/api/*"| backend
+    nginx -->|"/mailpit/*"| mailpit
+    backend -->|"SQL"| db
+    backend -->|"SMTP"| mailpit
+    repo -.->|"rsync synced folder<br/>vagrant up / vagrant rsync"| src
 ```
 
 | Component | Installed from | Role |

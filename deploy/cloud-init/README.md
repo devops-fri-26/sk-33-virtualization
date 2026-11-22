@@ -3,9 +3,22 @@
 One Ubuntu 24.04 VM, set up entirely from [`user-data.yaml`](user-data.yaml) at first boot. No Docker: every
 component comes from an apt repository and runs as a systemd service.
 
-```
-browser ──https──▶ Caddy :443 ──┬── /api/*  ──▶ uvicorn (FastAPI) 127.0.0.1:8000 ──▶ PostgreSQL 127.0.0.1:5432
-                                └── /*      ──▶ /var/www/varsis (built Vue app)
+```mermaid
+flowchart LR
+    browser(["Browser"])
+    subgraph vm["Ubuntu 24.04 VM"]
+        caddy["Caddy :443<br/>HTTPS"]
+        static["/var/www/varsis<br/>built Vue app"]
+        backend["Backend<br/>uvicorn + FastAPI<br/>127.0.0.1:8000"]
+        db[("PostgreSQL<br/>127.0.0.1:5432")]
+        mailpit["Mailpit<br/>(MAILPIT=true)"]
+    end
+    browser -->|"HTTPS"| caddy
+    caddy -->|"/*"| static
+    caddy -->|"/api/*"| backend
+    caddy -.->|"/mailpit/*"| mailpit
+    backend -->|"SQL"| db
+    backend -.->|"SMTP"| mailpit
 ```
 
 | Component | Source | Notes |
