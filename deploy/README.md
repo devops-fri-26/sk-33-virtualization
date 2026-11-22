@@ -40,7 +40,7 @@ flowchart LR
     subgraph host["Host devops-sk-33 · 88.200.24.30"]
         proxy["Incus proxy (NAT)<br/>:80 · :443 (TCP + UDP)"]
         subgraph vm["Ubuntu 24.04 VM (Incus) · 10.182.95.10"]
-            caddy["Caddy :443<br/>HTTPS · Let's Encrypt"]
+            caddy["Caddy :80 · :443 (TCP + UDP)<br/>HTTPS · HTTP/3 · Let's Encrypt"]
             static["/var/www/varsis<br/>built Vue app"]
             backend["Backend<br/>uvicorn + FastAPI<br/>127.0.0.1:8000"]
             db[("PostgreSQL<br/>127.0.0.1:5432")]
@@ -63,6 +63,7 @@ flowchart LR
 | 4 | **Frontend** (Vue 3 + Tailwind) | Single-page web app; built once at boot, then only static files | Node.js 24 from the NodeSource apt repository (build tool only) |
 | 5 | **Mailpit** | Catches every email the app sends (verification, password reset) and shows it in a web UI | Pinned GitHub release binary, checked against its SHA-256 (not packaged in apt) |
 | 6 | **ufw** | Host firewall inside the VM: only 22, 80, 443 open | Ubuntu apt |
+| 7 | **unattended-upgrades** | Installs updates every day: Ubuntu's security updates, plus Caddy and Python 3.13 | Ubuntu apt (configured in `write_files`) |
 | | **systemd** | Runs the backend and Mailpit as sandboxed services | (part of Ubuntu) |
 
 Host side (the VM's host): **Incus** (VM manager, apt) with **QEMU/KVM** (apt).
@@ -72,6 +73,7 @@ Host side (the VM's host): **Incus** (VM manager, apt) with **QEMU/KVM** (apt).
 ```
 deploy/
 ├── README.md                ← this file
+├── img/                      ← screenshots used in this file
 ├── cloud-init/
 │   ├── user-data.yaml        ← the cloud-config: settings, packages, runcmd
 │   ├── scripts/              ← one setup script per step (run by runcmd from the cloned repo)
@@ -161,7 +163,7 @@ cloud-init runs its modules in a fixed order, in three stages:
 ```mermaid
 flowchart TD
     subgraph init["1 · init stage"]
-        wf["write_files<br/>/etc/varsis/deploy.env"] --> users["users<br/>varsis system user"]
+        wf["write_files<br/>/etc/varsis/deploy.env<br/>automatic-updates config"] --> users["users<br/>varsis system user"]
     end
     subgraph config["2 · config stage"]
         apt["apt<br/>deadsnakes PPA"] --> save["runcmd<br/>only saved as a script"]
@@ -191,9 +193,9 @@ in [`cloud-init/files/`](cloud-init/files):
 | 2 | `install-dependencies.sh` | Adds the Caddy and NodeSource apt repositories (keys pinned with `signed-by`) and installs both |
 | 3 | `firewall.sh` | ufw allows 22, 80, 443 |
 | 4 | `secrets.sh` | Generates the secrets (database password, `SECRET_KEY`) **on the VM**: never stored in the repository |
-| 5 | `setup-mailpit.sh` | Mailpit (when enabled) |
+| 5 | `setup-mailpit.sh` | Mailpit (when enabled): pinned release, checked against its SHA-256 |
 | 6 | `setup-postgresql.sh` | PostgreSQL role and database |
-| 7 | `setup-backend.sh` | Exact package versions from `uv.lock`, `backend.env`, systemd service |
+| 7 | `setup-backend.sh` | uv (pinned version), exact package versions from `uv.lock`, `backend.env`, systemd service |
 | 8 | `build-frontend.sh` | Frontend build, copied to `/var/www/varsis` |
 | 9 | `start-caddy.sh` | Caddy config from the template, validated, reloaded |
 | 10 | `health-check.sh` | Waits until the backend answers its health check, then checks that Caddy answers for the site (http → https redirect) |
@@ -239,6 +241,7 @@ Details per line: [`cloud-init/EXPLAINED.md`](cloud-init/EXPLAINED.md).
 | PostgreSQL | journald / `/var/log/postgresql/` | `incus exec varsis -- journalctl -u postgresql` |
 | Health check | `GET /api/health` | `curl https://devops-sk-33.lrk.si/api/health` → `{"ok":true}` |
 | Service state | systemd | `incus exec varsis -- systemctl status varsis-backend caddy postgresql mailpit` |
+| Automatic updates | `/var/log/unattended-upgrades/` | `incus exec varsis -- tail /var/log/unattended-upgrades/unattended-upgrades.log`; which repositories it updates from: `incus exec varsis -- unattended-upgrade --dry-run --debug \| grep "Allowed origins"` |
 
 ## 8. Usage
 
@@ -295,8 +298,10 @@ Details, every script explained, and a comparison with this version: [`vagrant/R
   `MAILPIT=false`.
 - Mailpit is downloaded from GitHub (pinned version, SHA-256 checked), as it isn't packaged in Ubuntu's apt
   repositories.
-- cloud-init only runs on a VM's **first** boot: changed settings need a new VM (or editing
-  `/etc/varsis/deploy.env` and re-running `sh /var/lib/cloud/instance/scripts/runcmd`).
+- cloud-init only runs on a VM's **first** boot. A changed setting in `deploy.env` can be applied to a running VM
+  (edit `/etc/varsis/deploy.env`, re-run `sh /var/lib/cloud/instance/scripts/runcmd`), and so can changed scripts
+  (`git pull` first). Changes to the rest of `user-data.yaml` (`packages:`, the automatic-updates config in
+  `write_files`) only reach a new VM.
 - One VM, no backups or monitoring dashboards yet.
 - Python 3.13 comes from deadsnakes, a community PPA: updated when Python releases fixes, but without Ubuntu's
   security team behind it. The backend uses an updated Python after its next restart.

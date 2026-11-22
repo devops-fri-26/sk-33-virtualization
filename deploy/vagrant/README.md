@@ -145,6 +145,7 @@ missing, and the code and frontend are updated.
 | Database login | Peer authentication, no password | Password (generated on the VM), TCP on localhost |
 | Steps | Separate scripts, run by Vagrant over SSH | Separate scripts, cloned from GitHub and run by cloud-init's `runcmd` at first boot |
 | Re-run | `vagrant provision` | cloud-init runs once; re-run `sudo sh /var/lib/cloud/instance/scripts/runcmd` |
+| Automatic updates | Ubuntu's default: security updates only | Also Caddy's repository and the deadsnakes PPA (Python 3.13) |
 
 ## Troubleshooting
 
