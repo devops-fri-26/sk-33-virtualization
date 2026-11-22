@@ -70,11 +70,13 @@ incus admin init --minimal
 sudo ufw allow in on incusbr0 && sudo ufw route allow in on incusbr0 && sudo ufw route allow out on incusbr0
 ```
 
-A dev copy of the settings with Mailpit on (no domain, no real SMTP):
+A dev copy of the settings with Mailpit on (no domain, no real SMTP). `DOMAIN` is emptied: the committed file has
+our server's domain, and a local VM can't get a Let's Encrypt certificate for it:
 
 ```bash
 cp deploy/cloud-init/user-data.yaml ~/varsis-dev.yaml
-sed -i -e 's/^      MAILPIT=false/      MAILPIT=true/' \
+sed -i -e 's/^      DOMAIN=.*/      DOMAIN=/' \
+       -e 's/^      MAILPIT=false/      MAILPIT=true/' \
        -e 's/^      ADMIN_EMAILS=/      ADMIN_EMAILS=you@example.com/' ~/varsis-dev.yaml
 ```
 
