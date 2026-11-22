@@ -84,7 +84,7 @@ Why not let `uv` download Python? See the end of this document.
 | `pipx` | Installs Python CLI tools in isolated venvs. Used to install `uv` |
 
 Caddy and Node.js aren't here because their apt repositories are added later by `install-dependencies.sh`
-(section 9.1).
+(section 9.2).
 
 ## 5. Users
 
@@ -202,9 +202,9 @@ the code and config exist. ([`files/mailpit.service`](files/mailpit.service) is 
 | Script | Step |
 |---|---|
 | `common.sh` | Not a step: sourced by every script (settings, secrets, `log()`, site address) |
-| `install-dependencies.sh` | 9.1 Caddy and Node.js apt repositories |
-| `firewall.sh` | 9.2 ufw |
-| (runcmd itself) | 9.3 clone the repository |
+| (runcmd itself) | 9.1 clone the repository (it brings the scripts below) |
+| `install-dependencies.sh` | 9.2 Caddy and Node.js apt repositories |
+| `firewall.sh` | 9.3 ufw |
 | `secrets.sh` | 9.4 generate secrets |
 | `setup-mailpit.sh` | 9.5 Mailpit (testing) |
 | `setup-postgresql.sh` | 9.6 role and database |
@@ -257,7 +257,13 @@ again. The secrets file only exists after `secrets.sh` (9.4). Then:
   VM's IPs (the first is the one `incus list` shows) and Caddy uses its own CA (`TLS="tls internal"`).
   `SITE_HOST` drops a `:port` (only used with port forwarding).
 
-### 9.1 Third-party apt repositories (`install-dependencies.sh`)
+### 9.1 Get the code (in runcmd)
+
+`git clone --depth 1` fetches only the latest commit (faster, smaller). `[ -d /opt/varsis/.git ] ||` skips it when
+it's already there, so runcmd can run again. This brings both the app and the setup scripts, which is why it
+happens in runcmd and not in a script.
+
+### 9.2 Third-party apt repositories (`install-dependencies.sh`)
 
 For both Caddy and NodeSource:
 
@@ -273,7 +279,7 @@ stops dpkg from asking questions, since there's no terminal. The Caddy package a
 `caddy.service` and creates a `caddy` user. NodeSource's `node_24.x` is used because Vite 8 needs Node ≥ 20.19
 and Ubuntu 24.04 ships Node 18.
 
-### 9.2 Firewall (`firewall.sh`)
+### 9.3 Firewall (`firewall.sh`)
 
 - `ufw allow 22/tcp`: SSH. Allowed **before** enabling, otherwise you'd lock yourself out. By port number, not the
   `OpenSSH` profile name: minimal images (e.g. Incus's) have no SSH server and so no such profile.
@@ -281,12 +287,6 @@ and Ubuntu 24.04 ships Node 18.
 - `ufw allow 443`: TCP for HTTPS, and UDP for HTTP/3 (QUIC), which Caddy also offers.
 - `ufw --force enable`: turn it on without the "are you sure?" prompt. The default policy denies everything else
   incoming, so Postgres (5432) and the backend (8000) aren't reachable from outside even if they listened there.
-
-### 9.3 Get the code (in runcmd)
-
-`git clone --depth 1` fetches only the latest commit (faster, smaller). `[ -d /opt/varsis/.git ] ||` skips it when
-it's already there, so runcmd can run again. This brings both the app and the setup scripts, which is why it
-happens in runcmd and not in a script.
 
 ### 9.4 Secrets (`secrets.sh`)
 
