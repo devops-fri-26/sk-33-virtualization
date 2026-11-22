@@ -267,7 +267,13 @@ The same `user-data.yaml` runs locally before it goes to the server:
 - **Idempotent setup script**: re-runnable, also used for updates
 - **VM autostart** after a host reboot (`boot.autostart=true`)
 - **Fast deployment:** ~2.5 min from launch to a working HTTPS site
-- `<add more if you implement them>`
+- **Health check at the end:** cloud-init reports the deployment as failed unless the backend answers and Caddy
+  serves the site
+- **Automatic updates** not only from Ubuntu's security archive but also for Caddy and Python 3.13
+- **Supply chain:** Mailpit download checked against its SHA-256, uv pinned, Python packages locked
+- **No secrets in the logs:** tokens from email links are removed from the access log
+- **HTTP/3** (QUIC) through a UDP port forward
+- **Vagrant version** for development, with nginx instead of Caddy (section 11)
 
 ## 11. Vagrant version
 
@@ -294,4 +300,4 @@ Details, every script explained, and a comparison with this version: [`vagrant/R
 - One VM, no backups or monitoring dashboards yet.
 - Python 3.13 comes from deadsnakes, a community PPA: updated when Python releases fixes, but without Ubuntu's
   security team behind it. The backend uses an updated Python after its next restart.
-- `<add any others>`
+- The login and sign-up rate limits are kept in the backend's memory: a restart of the backend resets them.
