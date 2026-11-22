@@ -227,3 +227,6 @@ __marimo__/
 !/frontend/src/plugins/README.md
 
 graphify-out/
+
+# Vagrant per-machine state (VM ids, SSH private key, logs)
+.vagrant/
