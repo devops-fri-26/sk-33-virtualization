@@ -171,7 +171,8 @@ flowchart TD
     subgraph final["3 · final stage"]
         pkgs["packages<br/>git, postgresql, python3.13, …"] --> run["scripts_user<br/>runs the saved runcmd"]
     end
-    init --> config --> final
+    users --> apt
+    save --> pkgs
     run --> clone["git clone (app + scripts)"]
     clone --> s1["install-dependencies.sh"] --> s2["firewall.sh"] --> s3["secrets.sh"]
     s3 --> s4["setup-mailpit.sh"] --> s5["setup-postgresql.sh"] --> s6["setup-backend.sh"]
