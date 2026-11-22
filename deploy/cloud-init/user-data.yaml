@@ -118,7 +118,7 @@ runcmd:
   # Caddyfile from the template, HTTPS certificate
   - bash start-caddy.sh
 
-  # Wait until the backend answers
+  # Wait until the backend answers, then check that Caddy serves the site
   - bash health-check.sh
 
 final_message: "Varsis cloud-init finished after $UPTIME s. Details: /var/log/cloud-init-output.log"

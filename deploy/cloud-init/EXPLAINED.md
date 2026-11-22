@@ -243,7 +243,7 @@ the code and config exist. ([`files/mailpit.service`](files/mailpit.service) is 
 | `setup-backend.sh` | 9.7 Python packages, `backend.env`, service |
 | `build-frontend.sh` | 9.8 Vue build |
 | `start-caddy.sh` | 9.9 Caddyfile, HTTPS |
-| `health-check.sh` | 9.10 wait for the backend |
+| `health-check.sh` | 9.10 wait for the backend, check Caddy |
 
 ### Strict mode
 
@@ -445,9 +445,18 @@ Node is only a **build tool**. Nothing Node-based runs afterwards.
 
 ### 9.10 Health check (`health-check.sh`)
 
-The backend is polled up to 30 times, 2 seconds apart, on `/api/health`. `curl -f` fails on HTTP errors. If it
-never answers, the script exits with an error, so `cloud-init status` reports the deployment as **failed**
-instead of "done" with a broken app. On success it prints the URL.
+Two checks. If one fails, the script exits with an error, so `cloud-init status` reports the deployment as
+**failed** instead of "done" with a broken app. On success it prints the URL.
+
+1. **Backend:** polled up to 30 times, 2 seconds apart, on `http://127.0.0.1:8000/api/health`. `curl -f` fails on
+   HTTP errors.
+2. **Caddy:** a plain-http request to `127.0.0.1` with the site's name in the `Host` header (`curl -H "Host: …"`)
+   must get Caddy's **308** redirect to https. That only happens when Caddy runs and has loaded our Caddyfile for
+   that name. `-w '%{http_code}'` prints just the status code.
+
+The check doesn't use https on purpose: with a real domain, the certificate also needs DNS and the host's port
+forwards, which can be added after the VM was launched (as on our server). Caddy keeps retrying until then, so a
+missing certificate a minute after boot isn't a broken deployment.
 
 ## 10. runcmd and final_message
 
@@ -496,7 +505,7 @@ boot, a handy measure of deployment speed.
    7. `setup-backend.sh`: backend deps, `backend.env`, start the backend (it creates the tables)
    8. `build-frontend.sh`: build the frontend
    9. `start-caddy.sh`: configure Caddy (certificate)
-   10. `health-check.sh`: wait for the backend
+   10. `health-check.sh`: wait for the backend, check Caddy
 5. `final_message` with the total time.
 
 ## Where things end up on the VM

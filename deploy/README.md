@@ -193,7 +193,7 @@ in [`cloud-init/files/`](cloud-init/files):
 | 7 | `setup-backend.sh` | Exact package versions from `uv.lock`, `backend.env`, systemd service |
 | 8 | `build-frontend.sh` | Frontend build, copied to `/var/www/varsis` |
 | 9 | `start-caddy.sh` | Caddy config from the template, validated, reloaded |
-| 10 | `health-check.sh` | Waits until the backend answers its health check |
+| 10 | `health-check.sh` | Waits until the backend answers its health check, then checks that Caddy answers for the site (http → https redirect) |
 
 `common.sh` is sourced by every step (settings, secrets, helpers). runcmd starts with `set -e`, so the first
 failing step stops the rest and cloud-init reports an error.
