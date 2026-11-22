@@ -53,8 +53,8 @@ package_upgrade: false
 ```
 
 - `package_update: true` runs `apt-get update` before installing anything, so the package lists are current.
-- `package_upgrade: false` skips `apt-get upgrade` of the whole system. That saves minutes on first boot. Ubuntu
-  cloud images have **unattended-upgrades** enabled, which installs security updates in the background anyway.
+- `package_upgrade: false` skips `apt-get upgrade` of the whole system. That saves minutes on first boot.
+  **unattended-upgrades** installs security updates in the background instead (set up in section 6).
 
 ## 3. Extra apt source: deadsnakes
 
@@ -69,6 +69,10 @@ The backend's `pyproject.toml` requires Python ≥ 3.13, and Ubuntu 24.04 only h
 (Personal Package Archive on Launchpad) packages newer Pythons for Ubuntu. cloud-init adds it in the config stage
 and fetches its signing key from the Ubuntu keyserver, so it's ready before `packages:` is installed.
 
+deadsnakes is a **community** PPA, run by volunteers: unlike Ubuntu's own packages, Ubuntu's security team doesn't
+stand behind it. It's the usual way to get a newer Python from apt on an LTS release, and it's updated when Python
+releases fixes.
+
 Why not let `uv` download Python? See the end of this document.
 
 ## 4. Packages
@@ -82,6 +86,7 @@ Why not let `uv` download Python? See the end of this document.
 | `postgresql` | Database server (version 16 on 24.04). The package creates the `postgres` user and starts the service |
 | `python3.13`, `python3.13-venv` | Runtime for the backend (from deadsnakes) |
 | `pipx` | Installs Python CLI tools in isolated venvs. Used to install `uv` |
+| `unattended-upgrades` | Installs updates automatically every day (section 6). Usually already in the image; listed so it's certain |
 
 Caddy and Node.js aren't here because their apt repositories are added later by `install-dependencies.sh`
 (section 9.2).
@@ -128,6 +133,33 @@ The **only place you edit before launching**. It's a list of `NAME=value` lines 
 | `DEFAULT_QUOTA_GB` | Upload space per new user |
 | `SMTP_*` | Mail server for verification and password-reset mails |
 | `MAILPIT` | `true`: install Mailpit and send all mail there instead of `SMTP_*` (testing) |
+
+The second file is apt configuration for **unattended-upgrades**, the service that installs updates every day:
+
+```yaml
+- path: /etc/apt/apt.conf.d/51varsis-upgrades
+  content: |
+    APT::Periodic::Update-Package-Lists "1";
+    APT::Periodic::Unattended-Upgrade "1";
+    Unattended-Upgrade::Origins-Pattern {
+            "site=dl.cloudsmith.io";
+            "site=ppa.launchpadcontent.net";
+    };
+```
+
+- The two `APT::Periodic` lines turn on the daily `apt update` and the daily upgrade run. The package normally
+  sets them in `20auto-upgrades`; files are read in name order, so `51…` wins even if an image turned them off.
+- By default unattended-upgrades only installs Ubuntu's own **security** updates. `Origins-Pattern` adds two
+  repositories by their host name (`site`): Caddy's (`dl.cloudsmith.io`; Caddy faces the internet) and the
+  deadsnakes PPA (`ppa.launchpadcontent.net`; Python 3.13). Node.js isn't listed: it only builds the frontend once,
+  nothing runs it.
+- A Caddy update restarts Caddy (the package does that). A Python update is used by the backend after its next
+  restart (e.g. a reboot).
+- `/etc/caddy/Caddyfile` is also a file the Caddy package ships. If a Caddy release ever changes its own default
+  version of it, unattended-upgrades holds that one update back instead of asking which version to keep (it logs
+  this in `/var/log/unattended-upgrades/`).
+
+Check on the VM: `sudo unattended-upgrade --dry-run --debug | grep "Allowed origins"` lists both hosts.
 
 ## 7. Caddy template ([`files/Caddyfile.tmpl`](files/Caddyfile.tmpl))
 
@@ -449,7 +481,8 @@ boot, a handy measure of deployment speed.
 
 ## Timeline of a first boot
 
-1. **init:** `/etc/varsis/deploy.env` is written; users `ubuntu` and `varsis` are created.
+1. **init:** `/etc/varsis/deploy.env` and the unattended-upgrades config are written; users `ubuntu` and `varsis`
+   are created.
 2. **config:** the deadsnakes PPA is added; runcmd is saved as a script.
 3. **final:** `apt update`; git, curl, gpg, ufw, postgresql, python3.13, pipx are installed (Postgres starts).
 4. **final, runcmd:**
@@ -470,6 +503,7 @@ boot, a handy measure of deployment speed.
 | Path | Contents |
 |---|---|
 | `/etc/varsis/deploy.env` | Your settings (600) |
+| `/etc/apt/apt.conf.d/51varsis-upgrades` | Automatic updates: on, and also from Caddy's repo and deadsnakes |
 | `/etc/varsis/secrets.env` | Generated DB password and SECRET_KEY (600) |
 | `/etc/varsis/backend.env` | Everything the backend gets as environment (600) |
 | `/opt/varsis/` | The git checkout; `backend/.venv` is the Python environment; `deploy/cloud-init/scripts/` the setup steps |
@@ -485,8 +519,9 @@ boot, a handy measure of deployment speed.
 ## Likely defense questions
 
 - **Why doesn't uv download Python itself?** It could, but the assignment asks for package managers, and apt's
-  Python gets security updates. uv would also put it in `/root/.local/share/uv`, which the `varsis` service user
-  can't reach (`ProtectHome=true`).
+  Python is updated automatically with the rest of the system (unattended-upgrades also takes the deadsnakes PPA,
+  section 6). uv would also put it in `/root/.local/share/uv`, which the `varsis` service user can't reach
+  (`ProtectHome=true`).
 - **What happens if the setup runs twice?** Clone, secrets, DB role and DB are skipped if they exist; packages,
   build and configs are redone. So it doubles as the update command.
 - **Why are the scripts in the repository and not in user-data.yaml?** Readable, testable files, one per step,

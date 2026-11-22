@@ -15,7 +15,7 @@
 # like the Vagrant version. The config files they install are in deploy/cloud-init/files/.
 
 package_update: true
-package_upgrade: false # faster first boot; unattended-upgrades (on by default) installs security fixes
+package_upgrade: false # faster first boot; unattended-upgrades installs security fixes (see write_files)
 
 apt:
   sources:
@@ -31,6 +31,7 @@ packages:
   - python3.13
   - python3.13-venv
   - pipx
+  - unattended-upgrades # usually already in the image; listed so the automatic security updates are certain
 
 users:
   - default
@@ -70,6 +71,18 @@ write_files:
       # except SMTP_FROM are then ignored). Inbox: https://<site>/mailpit/, user "mailpit", password in
       # /etc/varsis/secrets.env (MAILPIT_PASSWORD).
       MAILPIT=false
+
+  # Automatic updates: on every day, and not only from Ubuntu's own security updates (unattended-upgrades' default)
+  # but also from Caddy's repository (it faces the internet) and the deadsnakes PPA (Python 3.13). Node.js is left
+  # out: it only builds the frontend, nothing runs it. Own file, read after the package's 20auto-upgrades.
+  - path: /etc/apt/apt.conf.d/51varsis-upgrades
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+      Unattended-Upgrade::Origins-Pattern {
+              "site=dl.cloudsmith.io";
+              "site=ppa.launchpadcontent.net";
+      };
 
 # runcmd is saved as one shell script and run at the end of boot. set -e: stop at the first step that fails, so
 # cloud-init reports an error. Run it again later (e.g. after git pull): sudo sh /var/lib/cloud/instance/scripts/runcmd

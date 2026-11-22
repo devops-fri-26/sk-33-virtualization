@@ -150,7 +150,7 @@ cloud-init runs its modules in a fixed order, in three stages:
 
 | Stage | Modules used here | What happens |
 |---|---|---|
-| **init** | `write_files`, `users_groups` | Settings, Caddyfile template, systemd units and the setup script are written; then the `varsis` system user is created |
+| **init** | `write_files`, `users_groups` | The settings (`/etc/varsis/deploy.env`) and the automatic-updates config are written; then the `varsis` system user is created |
 | **config** | `apt_configure`, `runcmd` | The deadsnakes PPA is added; `runcmd` is only **saved** as a script here, not run |
 | **final** | `package_update_upgrade_install`, `scripts_user` | `packages:` are installed, **then** the saved `runcmd` script runs |
 
@@ -220,7 +220,7 @@ Details per line: [`cloud-init/EXPLAINED.md`](cloud-init/EXPLAINED.md).
 | **Network exposure** | Backend, PostgreSQL and Mailpit listen on `127.0.0.1` only; ufw allows 22/80/443; Mailpit UI behind a password (bcrypt, Caddy `basic_auth`) |
 | **Process isolation** | Backend runs as its own unprivileged `varsis` user with systemd sandboxing (`ProtectSystem=strict`, `NoNewPrivileges`, `PrivateTmp`, `PrivateDevices`, writes only `/var/lib/varsis`); Mailpit with `DynamicUser` |
 | **Supply chain** | apt repository keys pinned per repository (`signed-by`); Python dependencies locked (`uv sync --frozen`), uv itself pinned; Mailpit release pinned to a version and checked against its SHA-256 |
-| **Updates** | `unattended-upgrades` (on by default in the Ubuntu image) installs security fixes |
+| **Updates** | `unattended-upgrades` installs updates every day: Ubuntu's security updates, plus Caddy's repository and the deadsnakes PPA (configured in `write_files`) |
 
 ![Browser: secure connection to devops-sk-33.lrk.si](img/cert.png)
 
@@ -288,4 +288,6 @@ Details, every script explained, and a comparison with this version: [`vagrant/R
 - cloud-init only runs on a VM's **first** boot: changed settings need a new VM (or editing
   `/etc/varsis/deploy.env` and re-running `sh /var/lib/cloud/instance/scripts/runcmd`).
 - One VM, no backups or monitoring dashboards yet.
+- Python 3.13 comes from deadsnakes, a community PPA: updated when Python releases fixes, but without Ubuntu's
+  security team behind it. The backend uses an updated Python after its next restart.
 - `<add any others>`
