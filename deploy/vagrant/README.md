@@ -143,8 +143,8 @@ missing, and the code and frontend are updated.
 | Web server | **nginx** | **Caddy** |
 | Certificate | Self-signed (Ubuntu's snakeoil) | Let's Encrypt, automatic |
 | Database login | Peer authentication, no password | Password (generated on the VM), TCP on localhost |
-| Steps | Separate scripts, run by Vagrant over SSH | One cloud-config, run by cloud-init at first boot |
-| Re-run | `vagrant provision` | cloud-init runs once; re-run `/usr/local/sbin/varsis-setup` |
+| Steps | Separate scripts, run by Vagrant over SSH | Separate scripts, cloned from GitHub and run by cloud-init's `runcmd` at first boot |
+| Re-run | `vagrant provision` | cloud-init runs once; re-run `sudo sh /var/lib/cloud/instance/scripts/runcmd` |
 
 ## Troubleshooting
 
