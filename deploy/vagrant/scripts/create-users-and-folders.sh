@@ -10,8 +10,8 @@ else
     useradd --system --home-dir /var/lib/varsis --shell /usr/sbin/nologin varsis
 fi
 
-install -d -o varsis -g varsis /opt/varsis                        # code
+install -d -o root -g root -m 755 /opt/varsis                     # code: root's, the service only reads it
 install -d -o root -g varsis -m 750 /etc/varsis                   # settings and secrets (root writes, varsis reads)
-install -d -o varsis -g varsis -m 750 /var/lib/varsis             # data, and the varsis user's home (uv/npm caches)
+install -d -o varsis -g varsis -m 750 /var/lib/varsis             # data, and the varsis user's home
 install -d -o varsis -g varsis -m 750 /var/lib/varsis/music /var/lib/varsis/covers
 install -d -o root -g root -m 755 /var/www/varsis                 # built frontend, served by nginx

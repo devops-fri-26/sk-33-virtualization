@@ -114,10 +114,10 @@ needs an NFS server and root on the host.
 | Script | What it does |
 |---|---|
 | `install-dependencies.sh` | Adds the deadsnakes PPA and NodeSource's apt repository (key pinned with `signed-by`); installs nginx, ssl-cert, PostgreSQL, Python 3.13, pipx, Node.js, rsync, ufw; installs `uv` (pinned version) |
-| `create-users-and-folders.sh` | System user `varsis` (no shell); `/opt/varsis` (code), `/etc/varsis` (settings, root writes / varsis reads), `/var/lib/varsis` (music, covers), `/var/www/varsis` (frontend) |
+| `create-users-and-folders.sh` | System user `varsis` (no shell); `/opt/varsis` (code, owned by root), `/etc/varsis` (settings, root writes / varsis reads), `/var/lib/varsis` (music, covers), `/var/www/varsis` (frontend) |
 | `setup-postgresql.sh` | Role and database `varsis`. **No password:** peer authentication over the Unix socket (OS user `varsis` = DB role `varsis`) |
 | `configuration.sh` | Generates `SECRET_KEY` once into `/etc/varsis/secrets.env` (600); writes `/etc/varsis/backend.env` (640, group varsis) |
-| `setup-backend.sh` | `rsync` of the synced code to `/opt/varsis` (owned by varsis); `uv sync --frozen` installs the exact versions from `uv.lock` |
+| `setup-backend.sh` | `rsync` of the synced code to `/opt/varsis` (owned by root: the `varsis` user runs the backend but can't change its code); `uv sync --frozen` installs the exact versions from `uv.lock` |
 | `build-frontend.sh` | `npm ci && npm run build`, copied to `/var/www/varsis` |
 | `setup-mailpit.sh` | Pinned Mailpit release (not in apt), checked against its SHA-256 before it's unpacked |
 | `services.sh` | Installs the systemd units from `files/`, starts them, waits for `/api/health` |
