@@ -1,13 +1,49 @@
-# Deploying Varsis on a server
+# Varsis with Docker Compose
 
-Step by step, from an empty Linux server to `https://music.example.com`. Caddy (from `docker-compose.https.yml`)
-gets the certificate and is the only thing reachable from outside. Replace `music.example.com`, `example.com` and
+The app's own Docker setup: PostgreSQL, the backend and the frontend (nginx) as containers, plus Caddy for HTTPS on
+a server. Everything for it is in this folder: the compose files, the `Caddyfile`, and your settings in `.env`.
+Run every `docker compose` command **in this folder** (`deploy/docker`): Compose reads the `.env` next to the
+compose files, both for the `${...}` values in them and for the backend's settings.
+
+## Run on your computer
+
+```bash
+cd deploy/docker
+cp ../../.env.example .env        # then set SECRET_KEY, POSTGRES_PASSWORD, ADMIN_EMAILS (and SMTP for production)
+docker compose --profile dev up --build
+```
+
+`--profile dev` adds Mailpit, which catches the emails the app sends (sign-up links). Leave it out in production,
+where `.env` has real SMTP values.
+
+All data is stored in folders under `DATA_DIR` (default `/varsis`): `postgres`, `music`, `covers`. Docker creates
+them on first start (owned by root).
+
+| Service | URL |
+|---|---|
+| App | http://localhost:8080 |
+| Mailpit (dev emails, with `--profile dev`) | http://localhost:8025 |
+
+## Deploy with HTTPS
+
+On a server with a public address, add `docker-compose.https.yml` to the compose file:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.https.yml up -d --build
+```
+
+It starts Caddy on ports 80 and 443, which gets a Let's Encrypt certificate for `DOMAIN` (set it in `.env`, e.g.
+`DOMAIN=music.example.com`) and renews it. The app is then only reachable at `https://DOMAIN`; port 8080 is closed.
+Before the first start, the domain's DNS record must point at the server and ports 80 and 443 must be open. Needs
+Docker Compose 2.24 or newer.
+
+## Deploying on a server, step by step
+
+From an empty Linux server to `https://music.example.com`. Caddy (from `docker-compose.https.yml`) gets the
+certificate and is the only thing reachable from outside. Replace `music.example.com`, `example.com` and
 `SERVER_IP` with your own values.
 
-Read section 1 of [TODO.md](TODO.md) first: it lists what is still missing for a public site (backups, migrations,
-the legal side).
-
-## What you need
+### What you need
 
 - A server with a public IP address where you can open ports 80 and 443. Nothing else may be listening on them
   (check with `sudo ss -tlnp | grep -E ':(80|443) '`).
@@ -16,14 +52,14 @@ the legal side).
   password-reset mails.
 - Enough disk for the music: lossless albums are 300-500 MB each, and every user may upload `DEFAULT_QUOTA_GB`.
 
-## 1. DNS
+### 1. DNS
 
 Add an `A` record for `music.example.com` that points at `SERVER_IP`.
 
 On Cloudflare, set the record to **DNS only** (grey cloud). Proxied (orange) records reject requests over 100 MB,
 which breaks uploads: the upload page sends parts of up to 500 MB.
 
-## 2. Email sender
+### 2. Email sender
 
 1. At the mail provider, add a sending domain. A subdomain such as `mail.example.com` keeps it apart from other
    mail on the domain.
@@ -31,7 +67,7 @@ which breaks uploads: the upload page sends parts of up to 500 MB.
    Without them, sign-up mails land in spam.
 3. Create an SMTP password or API key. You need it in step 4.
 
-## 3. Prepare the server
+### 3. Prepare the server
 
 ```bash
 curl -fsSL https://get.docker.com | sudo sh      # Docker with the compose plugin
@@ -41,17 +77,17 @@ sudo ufw allow OpenSSH && sudo ufw allow 80,443/tcp && sudo ufw enable
 ```
 
 Also open ports 80 and 443 in the hosting provider's own firewall, if it has one. The commands below use
-`docker compose`; put `sudo` in front unless your user is in the `docker` group.
+`docker compose` and run in `deploy/docker`; put `sudo` in front unless your user is in the `docker` group.
 
-## 4. Configure
+### 4. Configure
 
 ```bash
-git clone https://github.com/grobolsek/varsis-app.git && cd varsis-app
-cp .env.example .env
+git clone https://github.com/grobolsek/varsis-app.git && cd varsis-app/deploy/docker
+cp ../../.env.example .env
 openssl rand -hex 32     # run twice: one value for SECRET_KEY, one for POSTGRES_PASSWORD
 ```
 
-Set these in `.env`:
+Set these in `.env` (in `deploy/docker`):
 
 | Variable | Value |
 |---|---|
@@ -67,7 +103,7 @@ Set these in `.env`:
 Example for Resend: `SMTP_HOST=smtp.resend.com`, `SMTP_PORT=587`, `SMTP_USER=resend`, `SMTP_PASS=<API key>`,
 `SMTP_TLS=true`.
 
-## 5. Start
+### 5. Start
 
 ```bash
 docker compose up -d --build
@@ -79,7 +115,7 @@ curl -I https://music.example.com         # HTTP/2 200
 Caddy asks Let's Encrypt for the certificate on the first start; this takes up to a minute and needs step 1 to be
 done. The certificate is kept in `DATA_DIR/caddy` and renewed automatically.
 
-## 6. First login
+### 6. First login
 
 1. Open `https://music.example.com` and sign up with **every** address in `ADMIN_EMAILS` straight away, then click
    the link in the confirmation mail. An admin address without an account can be registered by anyone.
@@ -91,13 +127,13 @@ Other people sign up themselves; you approve them under account menu → **Admin
 ## Updating
 
 ```bash
-git pull
+git pull                     # in deploy/docker
 docker compose up -d --build
 ```
 
 ## Backups
 
-All state is in `DATA_DIR` (`postgres`, `music`, `covers`, `caddy`) and in `.env`.
+All state is in `DATA_DIR` (`postgres`, `music`, `covers`, `caddy`) and in `deploy/docker/.env`.
 
 ```bash
 docker compose exec -T db pg_dump -U varsis varsis | gzip > varsis-db-$(date +%F).sql.gz
@@ -110,7 +146,7 @@ then `docker compose up -d`.
 
 ## Moving to another server
 
-1. Do steps 3 and 4 on the new server, but copy the old `.env` over instead of writing a new one
+1. Do steps 3 and 4 on the new server, but copy the old `deploy/docker/.env` over instead of writing a new one
    (`POSTGRES_PASSWORD` has to match the copied database).
 2. On the old server: `docker compose down`.
 3. Copy the whole `DATA_DIR` to the same path on the new server, as root so that file owners are kept:

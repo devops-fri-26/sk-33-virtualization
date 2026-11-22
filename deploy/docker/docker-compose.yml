@@ -1,3 +1,4 @@
+# Run in this folder, with your settings in .env next to this file (cp ../../.env.example .env). See README.md.
 # All data lives in folders under DATA_DIR (default /varsis): postgres, music, covers.
 services:
   db:

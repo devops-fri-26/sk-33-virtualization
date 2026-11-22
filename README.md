@@ -1,32 +1,18 @@
 # Varsis
 
-Self-hosted lossless music server: FastAPI + SQLAlchemy + PostgreSQL, Vue + Tailwind, Docker Compose.
+Self-hosted lossless music server: FastAPI + SQLAlchemy + PostgreSQL, Vue + Tailwind.
 
-## Run with Docker
-```bash
-cp .env.example .env        # then set SECRET_KEY, POSTGRES_PASSWORD, ADMIN_EMAILS (and SMTP for production)
-docker compose --profile dev up --build
-```
-`--profile dev` adds Mailpit, which catches the emails the app sends (sign-up links). Leave it out in production, where `.env` has real SMTP values.
+## Deployment
 
-All data is stored in folders under `DATA_DIR` (default `/varsis`): `postgres`, `music`, `covers`. Docker creates them on first start (owned by root).
-
-| Service | URL |
+| How | Guide |
 |---|---|
-| App | http://localhost:8080 |
-| Mailpit (dev emails, with `--profile dev`) | http://localhost:8025 |
+| A VM set up by cloud-init (our production server), or by Vagrant (development) | [deploy/README.md](deploy/README.md) |
+| Docker Compose (on your computer, or on a server with HTTPS) | [deploy/docker/README.md](deploy/docker/README.md) |
+
+## How it works
 
 ### Plugins
 Optional features live in their own repositories and are added as plugins: a folder for the API (`backend/app/plugins/<name>/`) and one for the web app (`frontend/src/plugins/<name>/`). Without plugins the app runs as described here. How a plugin is written and built in: [backend](backend/app/plugins/README.md), [frontend](frontend/src/plugins/README.md).
-
-### Deploy with HTTPS
-On a server with a public address, add `docker-compose.https.yml` to the compose file:
-```bash
-docker compose -f docker-compose.yml -f docker-compose.https.yml up -d --build
-```
-It starts Caddy on ports 80 and 443, which gets a Let's Encrypt certificate for `DOMAIN` (set it in `.env`, e.g. `DOMAIN=music.example.com`) and renews it. The app is then only reachable at `https://DOMAIN`; port 8080 is closed. Before the first start, the domain's DNS record must point at the server and ports 80 and 443 must be open. Needs Docker Compose 2.24 or newer.
-
-The whole way from an empty server to a running site (DNS, email, `.env`, backups, moving servers): [DEPLOY.md](DEPLOY.md).
 
 ### Accounts
 - **Sign-up:** new users confirm their email, then an admin approves them (account menu → **Admin**). Admins get an email when someone is waiting, and the user gets one when approved.
@@ -45,9 +31,8 @@ The whole way from an empty server to a running site (DNS, email, `.env`, backup
 
 ## Local development
 ```bash
-docker compose up -d db mailpit
 cd backend && uv run uvicorn app.main:app --reload   # :8000 (use localhost URLs in backend/.env)
 cd frontend && npm run dev                            # :5173, proxies /api to :8000
 ```
 
-See [TODO.md](TODO.md) for what's left before this can be put on the internet, and for known limitations.
+The backend needs a PostgreSQL, and Mailpit for the mails: `docker compose up -d db mailpit` in `deploy/docker`.
