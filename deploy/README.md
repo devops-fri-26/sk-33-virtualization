@@ -79,12 +79,11 @@ deploy/
 │   ├── README.md             ← settings and the cloud-init stage order
 │   ├── EXPLAINED.md          ← step-by-step explanation of user-data.yaml and the scripts
 │   └── SERVER-SETUP.md       ← step-by-step deployment on our server, incl. every problem we hit
-├── vagrant/                  ← Vagrant version, development (see section 11)
-│   ├── Vagrantfile
-│   ├── scripts/              ← one provisioning script per step
-│   ├── files/                ← nginx site, systemd units
-│   └── README.md
-└── docker/                   ← (the app's own Docker Compose setup, not part of this homework)
+└── vagrant/                  ← Vagrant version, development (see section 11)
+    ├── Vagrantfile
+    ├── scripts/              ← one provisioning script per step
+    ├── files/                ← nginx site, systemd units
+    └── README.md
 backend/                      ← FastAPI app
 frontend/                     ← Vue app
 ```

@@ -7,7 +7,6 @@ Self-hosted lossless music server: FastAPI + SQLAlchemy + PostgreSQL, Vue + Tail
 | How | Guide |
 |---|---|
 | A VM set up by cloud-init (our production server), or by Vagrant (development) | [deploy/README.md](deploy/README.md) |
-| Docker Compose (on your computer, or on a server with HTTPS) | [deploy/docker/README.md](deploy/docker/README.md) |
 
 ## How it works
 
@@ -35,4 +34,5 @@ cd backend && uv run uvicorn app.main:app --reload   # :8000 (use localhost URLs
 cd frontend && npm run dev                            # :5173, proxies /api to :8000
 ```
 
-The backend needs a PostgreSQL, and Mailpit for the mails: `docker compose up -d db mailpit` in `deploy/docker`.
+The backend needs a PostgreSQL, and Mailpit for the mails. Or run the whole stack from your checkout in the Vagrant
+VM: [deploy/vagrant](deploy/vagrant/README.md).

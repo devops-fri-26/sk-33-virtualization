@@ -193,7 +193,7 @@ Line by line:
 file server.
 
 **Why Caddy and not nginx:** Caddy gets and renews TLS certificates by itself; with nginx you'd need certbot plus
-a renewal timer. It replaces both the old `frontend/nginx.conf` and the Caddy container from the Docker setup.
+a renewal timer.
 
 ## 8. systemd service ([`files/varsis-backend.service`](files/varsis-backend.service))
 
