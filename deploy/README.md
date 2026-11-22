@@ -1,12 +1,9 @@
 # Varsis: automated VM deployment with cloud-init
 
-> 📸 **TODO (add yourself):** replace every `📸 SCREENSHOT` / `🎬 VIDEO` placeholder below with a real image or link.
-> Put images in `docs/screenshots/` and reference them as `![description](../docs/screenshots/<file>.png)`.
-
-**Team sk-33:** `<name surname>`, `<name surname>`, `<name surname>` &nbsp;·&nbsp; **Live deployment:**
+**Team sk-33:** `Bor Furlan`, `Matic Grobolšek` &nbsp;·&nbsp; **Live deployment:**
 https://devops-sk-33.lrk.si
 
-🎬 **VIDEO:** `<link to a recording of a full deployment: launch → cloud-init log → app in the browser>`
+The usage of the app is shown live at the defense.
 
 ## Contents
 
@@ -33,7 +30,7 @@ The goal of this homework: **one file, [`cloud-init/user-data.yaml`](cloud-init/
 Ubuntu 24.04 VM into a production deployment** of the whole stack, with HTTPS, without any manual step inside the
 VM.
 
-📸 **SCREENSHOT:** `app-library.png`: the library page in the browser
+![Varsis login page on devops-sk-33.lrk.si](cloud-init/img/varsis.png)
 
 ## 2. Architecture and components
 
@@ -114,12 +111,11 @@ incus config device add varsis https proxy nat=true listen=tcp:88.200.24.30:443 
 incus exec varsis -- tail -f /var/log/cloud-init-output.log    # … [varsis-setup] done: https://devops-sk-33.lrk.si
 ```
 
-**Deployment time:** about **150 s** from `incus launch` to a working site on our server (first boot, including
-all package installs and the frontend build). Measured: `Varsis cloud-init finished after 148.83 s`.
+**Deployment time:** about **2.5 minutes** from `incus launch` to a working site on our server (first boot,
+including all package installs and the frontend build): `Varsis cloud-init finished after 163.65 s` in the
+screenshot below.
 
-📸 **SCREENSHOT:** `incus-launch.png`: terminal with `incus launch` and `incus list` (VM running with its IP)
-
-📸 **SCREENSHOT:** `cloud-init-done.png`: end of `cloud-init-output.log` with `[varsis-setup] done` and the time
+![End of cloud-init-output.log: Caddy configured, "[varsis-setup] done", total time](cloud-init/img/deploy.png)
 
 The same `user-data.yaml` also works unchanged on any cloud provider: paste it into the "user data" field when
 creating an Ubuntu 24.04 server.
@@ -196,8 +192,7 @@ Details per line: [`cloud-init/EXPLAINED.md`](cloud-init/EXPLAINED.md).
 | **Supply chain** | apt repository keys pinned per repository (`signed-by`); Python dependencies locked (`uv sync --frozen`); Mailpit release pinned to a version |
 | **Updates** | `unattended-upgrades` (on by default in the Ubuntu image) installs security fixes |
 
-📸 **SCREENSHOT:** `certificate.png`: the browser's certificate viewer showing Let's Encrypt as issuer for
-devops-sk-33.lrk.si
+![Browser: secure connection to devops-sk-33.lrk.si](cloud-init/img/cert.png)
 
 ## 7. Logging
 
@@ -211,8 +206,6 @@ devops-sk-33.lrk.si
 | Health check | `GET /api/health` | `curl https://devops-sk-33.lrk.si/api/health` → `{"ok":true}` |
 | Service state | systemd | `incus exec varsis -- systemctl status varsis-backend caddy postgresql mailpit` |
 
-📸 **SCREENSHOT:** `logs.png`: `systemctl status` of all services, or the JSON access log
-
 ## 8. Usage
 
 1. Open https://devops-sk-33.lrk.si and **register** with an address from `ADMIN_EMAILS`.
@@ -221,16 +214,6 @@ devops-sk-33.lrk.si
 3. Log in, **upload** an album folder, play it.
 4. A second user registers → the admin gets an email → approves them on the **Admin** page.
 
-📸 **SCREENSHOT:** `register.png`: sign-up page
-
-📸 **SCREENSHOT:** `mailpit.png`: the verification mail in Mailpit
-
-📸 **SCREENSHOT:** `upload.png`: upload page with an album being imported
-
-📸 **SCREENSHOT:** `admin.png`: admin page (approving a user, quotas)
-
-📸 **SCREENSHOT:** `player.png`: an album playing
-
 ## 9. Local testing
 
 The same `user-data.yaml` runs locally before it goes to the server:
@@ -238,7 +221,6 @@ The same `user-data.yaml` runs locally before it goes to the server:
 | Tool | Command | Notes |
 |---|---|---|
 | **Incus** | see [`cloud-init/README.md`](cloud-init/README.md) | Same as the server; VM gets an IP on `incusbr0` |
-
 
 ## 10. Extra features
 
@@ -250,7 +232,7 @@ The same `user-data.yaml` runs locally before it goes to the server:
 - **Real client IPs** through the NAT port forward (rate limits work per visitor)
 - **Idempotent setup script**: re-runnable, also used for updates
 - **VM autostart** after a host reboot (`boot.autostart=true`)
-- **Fast deployment:** ~150 s from launch to a working HTTPS site
+- **Fast deployment:** ~2.5 min from launch to a working HTTPS site
 - `<add more if you implement them>`
 
 ## 11. Vagrant version
@@ -266,8 +248,6 @@ ADMIN_EMAILS=you@example.com vagrant up       # https://localhost:8443, mails at
 ```
 
 Details, every script explained, and a comparison with this version: [`vagrant/README.md`](vagrant/README.md).
-
-📸 **SCREENSHOT:** `vagrant-up.png`: end of `vagrant up` with "Provisioning complete"
 
 ## 12. Known limitations
 
