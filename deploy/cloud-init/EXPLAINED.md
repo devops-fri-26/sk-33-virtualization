@@ -181,7 +181,7 @@ Line by line:
 | `header_up X-Real-IP {remote_host}` | The backend's login rate limit counts attempts per IP and reads it from `X-Real-IP` (`backend/app/ratelimit.py`). Caddy *overwrites* the header with the real client address, so a client can't fake it |
 | `flush_interval -1` | Pass response data on immediately instead of buffering. Needed for streaming audio |
 | `handle` + `try_files` + `file_server` | Everything else is a static file from `/var/www/varsis`. `try_files {path} /index.html` serves `index.html` for paths that aren't files (e.g. `/album/12`), so the Vue router can handle them (single-page app) |
-| `log` | Access log as JSON in `/var/log/caddy/varsis-access.log`. Caddy rotates it itself (by default at 100 MB) |
+| `log` + `format filter` | Access log as JSON in `/var/log/caddy/varsis-access.log`. Caddy rotates it itself (by default at 100 MB). The `filter` wraps the JSON format and changes two fields first: `token` in the URL's query becomes `REDACTED`, and the `Referer` header is left out. Email links carry a token (`/verify?token=…`, `/reset-password?token=…`), and the JS/CSS that page loads would send the whole link as `Referer`; anyone reading the log could otherwise reset that user's password |
 
 `handle` blocks are mutually exclusive and checked most specific first, so `/api/...` never falls through to the
 file server.

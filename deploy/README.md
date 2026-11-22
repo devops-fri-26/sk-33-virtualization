@@ -231,7 +231,7 @@ Details per line: [`cloud-init/EXPLAINED.md`](cloud-init/EXPLAINED.md).
 |---|---|---|
 | Deployment log | `/var/log/cloud-init-output.log` | `incus exec varsis -- tail -f /var/log/cloud-init-output.log` |
 | Backend | journald | `incus exec varsis -- journalctl -u varsis-backend -f` |
-| Requests (JSON, one line per request) | `/var/log/caddy/varsis-access.log` | `incus exec varsis -- tail -f /var/log/caddy/varsis-access.log` |
+| Requests (JSON, one line per request; tokens from email links removed) | `/var/log/caddy/varsis-access.log` | `incus exec varsis -- tail -f /var/log/caddy/varsis-access.log` |
 | Caddy, certificates | journald | `incus exec varsis -- journalctl -u caddy` |
 | PostgreSQL | journald / `/var/log/postgresql/` | `incus exec varsis -- journalctl -u postgresql` |
 | Health check | `GET /api/health` | `curl https://devops-sk-33.lrk.si/api/health` → `{"ok":true}` |

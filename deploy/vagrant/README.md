@@ -130,7 +130,7 @@ missing, and the code and frontend are updated.
 
 | File | |
 |---|---|
-| `nginx-varsis.conf` | HTTPS on 443, security headers, 1 MB body limit (2 GB for `/api/upload`, streamed), `/api/` → backend, `/mailpit/` → Mailpit (with WebSocket), everything else → `index.html` |
+| `nginx-varsis.conf` | HTTPS on 443, security headers, 1 MB body limit (2 GB for `/api/upload`, streamed), `/api/` → backend, `/mailpit/` → Mailpit (with WebSocket), everything else → `index.html`; access log without query strings and Referer (email links carry a token) |
 | `varsis-backend.service` | uvicorn on 127.0.0.1:8000 as user `varsis`, settings from `/etc/varsis/backend.env`, systemd sandboxing (`ProtectSystem=strict`, writes only `/var/lib/varsis`, …) |
 | `mailpit.service` | SMTP on 127.0.0.1:1025, UI on 127.0.0.1:8025 under `/mailpit/`, `DynamicUser` |
 

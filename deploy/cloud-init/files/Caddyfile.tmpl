@@ -42,8 +42,17 @@ __SITE__ {
 		file_server
 	}
 
+	# One JSON line per request. Email links carry a token (/verify?token=…, /reset-password?token=…), which would
+	# otherwise be in the log twice: in the URL, and in the Referer of the files that page loads. So the token in the
+	# URL is replaced and the Referer header isn't logged.
 	log {
 		output file /var/log/caddy/varsis-access.log
-		format json
+		format filter {
+			wrap json
+			request>uri query {
+				replace token REDACTED
+			}
+			request>headers>Referer delete
+		}
 	}
 }
