@@ -23,7 +23,7 @@ Edit the `/etc/varsis/deploy.env` block at the top of `write_files` in `user-dat
 | Variable | Meaning |
 |---|---|
 | `DOMAIN` | Public host name. Its DNS points at the VM and ports 80/443 are reachable: Caddy gets a Let's Encrypt certificate. **Empty** (local VM): the VM's IP with a certificate from Caddy's local CA |
-| `SITE` | Only for a VM reached through port forwarding (`run-qemu.sh`): the address the browser opens, e.g. `localhost:8443`. Empty: `DOMAIN`, or the VM's IP |
+| `SITE` | Only for a VM reached through port forwarding: the address the browser opens, e.g. `localhost:8443`. Empty: `DOMAIN`, or the VM's IP |
 | `REPO_URL`, `REPO_REF` | What to deploy |
 | `ADMIN_EMAILS` | Comma-separated admin accounts |
 | `SMTP_*` | Mail provider for sign-up and password mails. Empty: no mails are sent |
@@ -84,25 +84,6 @@ incus exec varsis -- cloud-init status --long
 Open `https://<IPv4>` and accept the certificate warning (Caddy's own CA; with `DOMAIN` set it's a real one).
 Start over with a fresh first boot: `incus delete -f varsis`, then launch again.
 
-## Run locally with QEMU
-
-No Incus? [`run-qemu.sh`](run-qemu.sh) needs only QEMU, curl and python3 (no root, no network bridge). It boots
-the same Ubuntu 24.04 cloud image with this `user-data.yaml`, set up for testing: Mailpit on, no domain, and
-`SITE=localhost:8443` because the VM is reached through forwarded ports.
-
-```bash
-ADMIN_EMAIL=you@example.com deploy/cloud-init/run-qemu.sh          # first run: ~5-10 min, log in the terminal
-```
-
-| | |
-|---|---|
-| App | `https://localhost:8443` (certificate warning: Caddy's own CA) |
-| Mailpit | `https://localhost:8443/mailpit/`, user `mailpit`, password: `ssh -p 2222 ubuntu@localhost sudo grep MAILPIT_PASSWORD /etc/varsis/secrets.env` |
-| Shell | `ssh -p 2222 ubuntu@localhost` (your `~/.ssh/*.pub` keys) |
-| Stop | `Ctrl-A`, then `X` |
-
-Running it again boots the same VM; `--reset` starts over with a fresh first boot. `REPO_REF=<branch>` deploys
-another branch (with `--reset`). Files are kept in `~/.cache/varsis-qemu`.
 
 ## Check it
 
@@ -143,12 +124,18 @@ cloud-init runs its modules in stages:
 3. **final**: `package-update-upgrade-install` installs `packages:`, then `scripts-user` *executes* the runcmd
    script. So `runcmd` already runs after all packages are installed.
 
-`runcmd` calls one script, `/usr/local/sbin/varsis-setup`. It adds the Caddy and NodeSource repos (their keys
-are fetched and pinned with `signed-by`), so those two packages are installed there and not in `packages:`.
-The script can be run again: it skips the clone, the secrets and the database if they already exist.
+`runcmd` clones the repository and runs the setup scripts from it, one per step, like the Vagrant version:
+[`scripts/`](scripts) (`install-dependencies.sh`, `firewall.sh`, `secrets.sh`, `setup-mailpit.sh`,
+`setup-postgresql.sh`, `setup-backend.sh`, `build-frontend.sh`, `start-caddy.sh`, `health-check.sh`), with the config
+files they install in [`files/`](files). The first step adds the Caddy and NodeSource repos (keys pinned with
+`signed-by`), so those two packages are installed there and not in `packages:`. Everything can run again: the
+clone, the secrets and the database are skipped if they already exist.
+
+The VM gets the scripts by cloning `REPO_URL` at `REPO_REF`, so that repository must be public, and a changed
+script reaches new VMs only after it's pushed there.
 
 ## Update to a newer commit
 
 ```bash
-sudo git -C /opt/varsis pull && sudo /usr/local/sbin/varsis-setup
+sudo git -C /opt/varsis pull && sudo sh /var/lib/cloud/instance/scripts/runcmd
 ```

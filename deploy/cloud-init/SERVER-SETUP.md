@@ -114,7 +114,7 @@ In the `/etc/varsis/deploy.env` block:
 DOMAIN=devops-sk-33.lrk.si     # Caddy requests a Let's Encrypt certificate for it
 ADMIN_EMAILS=you@example.com
 MAILPIT=true                   # no mail provider: mails are caught by Mailpit (https://<domain>/mailpit/)
-SITE=                          # leave empty; only for port-forwarded test VMs (run-qemu.sh)
+SITE=                          # leave empty; only for port-forwarded test VMs
 ```
 
 `varsis.yaml` contains no generated secrets (the VM creates those itself). If you put a real `SMTP_PASS` in it, don't
@@ -217,7 +217,7 @@ incus config device show varsis                               # port forwards, f
 Update to a newer commit of the app:
 
 ```bash
-incus exec varsis -- sh -c 'git -C /opt/varsis pull && /usr/local/sbin/varsis-setup'
+incus exec varsis -- sh -c 'git -C /opt/varsis pull && sh /var/lib/cloud/instance/scripts/runcmd'
 ```
 
 Start over (cloud-init only runs on a VM's first boot, so changed settings need a new VM; the port forwards are
